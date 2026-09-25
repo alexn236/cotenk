@@ -1,0 +1,37 @@
+CoTenk - Think together. Work together.
+
+Grundprinzip: 
+Offener Workspace für Teams, die ein offenes Ökosystem haben mit ACP, für AI Agents und reale Menschen in einem Workspace, wo ein Team von Agents und echten Menschen arbeiten können, aber auch jeweils einzelne. Wichtig ist es kein Agent, sondern ein Workspace, welcher einfache Tools zusammenführt.
+
+Idee in eine Satz:
+Offener Workspace für alle Tools die man braucht an einer Stelle - Für Teams und alleine
+
+Genauere Features:
+Ein Workspace wie notion der das kann:
+Markdow Files ordentlich anzeigen, so wie in notion
+Features wie To-do listen etc. auch wie in notion 
+Custom Code der auch von Agents erstellt werden kann womit man Sachen auf den Seiten embedden kann wie interaktive diagramme 
+ACP support für Devin Cli, Claude Code und sonstige Agent wo man schnell mit verbindung einrichten kann 
+Task wo man seine Task angucken kann
+
+Funktionsweise: 
+Login per Supabase
+Agent aktuell alle Lokal noch, Prompts etc. werden nicht gespeichert
+Inhalt der Dokumente und so wird auch in Supabase gespeichert, damit es immer erreichbar ist von allen geräten
+Alle Docs synchronisieren sich immer mit Supabse lokal und der Agent schreibt immer auf die Lokalen files die sich dann synchronisieren 
+Alles erstmal nur als Website
+Mehrere User absichtlich erstmal weggelassen auf dasselbe dokument
+
+Was noch zu klären ist:
+Ux wie wird alles an Docs und Agents verwaltet ohne das es überfüllt aussieht  
+Wie Sachen embedded werden
+
+Zum Starten:
+Erstmal den Workspace ohne ai ohne alles als einfach markdown mit ordnern und so
+Login 
+Erstellen von Folders und Docs
+Sync mit Supabase von Dokumenten und so 
+AI Features integrieren inkl. embedded Sachen so, wichtig erstmal nur Devin Cli ,da das ACP out of the Box unterstützt
+HTML und Sachen die keine extra libraries brauchen oder installs brauchen oder die halt super aufwendig sind    
+Bearbeiten von Files ist aber ja standard bei Agents 
+Danach können andere Agents optimal dann auch welche, wo man ein Modell per api key nutzen kann. 

@@ -1,0 +1,360 @@
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@import "tailwindcss";
+
+:root {
+  /* next/font/google equivalents — bundled via fontsource */
+  --font-geist-sans: "Geist Variable", "Helvetica Neue", system-ui, sans-serif;
+  --font-geist-mono: "Geist Mono Variable", "SF Mono", ui-monospace, monospace;
+}
+
+@theme inline {
+  /* ---- semantic tokens, resolved per data-theme at runtime ---- */
+  --color-canvas: var(--canvas);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-elev: var(--elev);
+  --color-hover: var(--hover);
+
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-accent-dim: var(--accent-dim);
+  --color-accent-line: var(--accent-line);
+  --color-on-accent: var(--on-accent);
+  --color-danger: var(--danger);
+  --color-shadow: var(--shadow);
+
+  /* ---- radius system: 6px items, 10px cards, 14px panels ---- */
+  --radius-item: 6px;
+  --radius-card: 10px;
+  --radius-panel: 14px;
+
+  /* ---- motion ---- */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --font-sans: var(--font-geist-sans), "Helvetica Neue", system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), "SF Mono", ui-monospace, monospace;
+}
+
+/* ============================================================
+   Theme: warm charcoal (dark, default) / warm bone (light)
+   ============================================================ */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --canvas: #131211;
+  --panel: #171615;
+  --panel-2: #1c1a18;
+  --elev: #232120;
+  --hover: #2a2725;
+
+  --line: #2e2b28;
+  --line-soft: #221f1d;
+
+  --ink: #e9e7e1;
+  --ink-2: #a29d94;
+  --ink-3: #67625c;
+
+  --accent: #e2a05c;
+  --accent-2: #eebd87;
+  --accent-dim: #e2a05c22;
+  --accent-line: #e2a05c45;
+  --on-accent: #221607;
+  --danger: #e0685e;
+  --shadow: rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --canvas: #f4f2ea;
+  --panel: #faf9f4;
+  --panel-2: #efeee5;
+  --elev: #ffffff;
+  --hover: #eae8dd;
+
+  --line: #dcd9ca;
+  --line-soft: #e7e5d9;
+
+  --ink: #232a20;
+  --ink-2: #6b7263;
+  --ink-3: #9aa192;
+
+  --accent: #a8641c;
+  --accent-2: #8f5a19;
+  --accent-dim: #a8641c1f;
+  --accent-line: #a8641c40;
+  --on-accent: #ffffff;
+  --danger: #b3382e;
+  --shadow: rgba(35, 42, 32, 0.14);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+html {
+  background: var(--color-canvas);
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+  transition:
+    background-color 240ms var(--ease-out-expo),
+    color 240ms var(--ease-out-expo);
+}
+
+::selection {
+  background: var(--color-accent-dim);
+  color: var(--color-ink);
+}
+
+/* ---- thin scrollbars ---- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+kbd {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1;
+  padding: 3px 5px;
+  border: 1px solid var(--color-line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--color-panel-2);
+  color: var(--color-ink-2);
+}
+
+/* ============================================================
+   prose-doc: rendered markdown typography for the editor
+   ============================================================ */
+.prose-doc {
+  font-size: 15.5px;
+  line-height: 1.72;
+  color: var(--color-ink);
+  word-break: break-word;
+}
+
+.prose-doc h1,
+.prose-doc h2,
+.prose-doc h3,
+.prose-doc h4 {
+  color: var(--color-ink);
+  letter-spacing: -0.02em;
+  scroll-margin-top: 96px;
+}
+.prose-doc h1 {
+  font-size: 1.9em;
+  font-weight: 650;
+  line-height: 1.2;
+  margin: 1.4em 0 0.5em;
+}
+.prose-doc h2 {
+  font-size: 1.42em;
+  font-weight: 620;
+  line-height: 1.28;
+  margin: 1.7em 0 0.45em;
+}
+.prose-doc h3 {
+  font-size: 1.13em;
+  font-weight: 600;
+  margin: 1.5em 0 0.35em;
+}
+.prose-doc h4 {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 1.3em 0 0.3em;
+}
+.prose-doc > :first-child {
+  margin-top: 0;
+}
+
+.prose-doc p {
+  margin: 0.55em 0;
+}
+
+.prose-doc a {
+  color: var(--color-accent-2);
+  text-decoration: underline;
+  text-decoration-color: var(--color-accent-line);
+  text-underline-offset: 3px;
+  transition: text-decoration-color 150ms var(--ease-out-expo);
+}
+.prose-doc a:hover {
+  text-decoration-color: var(--color-accent);
+}
+
+.prose-doc ul,
+.prose-doc ol {
+  padding-left: 1.45em;
+  margin: 0.55em 0;
+}
+.prose-doc ul {
+  list-style: none;
+}
+.prose-doc ul > li {
+  position: relative;
+}
+.prose-doc ul > li::before {
+  content: "";
+  position: absolute;
+  left: -1.05em;
+  top: 0.72em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-ink-3);
+}
+.prose-doc ol {
+  list-style: decimal;
+}
+.prose-doc ol > li::marker {
+  color: var(--color-ink-3);
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+.prose-doc li {
+  margin: 0.28em 0;
+}
+/* single-item list blocks: keep the same rhythm as intra-list spacing */
+.prose-doc > ul:only-child,
+.prose-doc > ol:only-child {
+  margin: 0;
+}
+.prose-doc > ul:only-child > li:only-child,
+.prose-doc > ol:only-child > li:only-child {
+  margin: 0.14em 0;
+}
+.prose-doc li > ul,
+.prose-doc li > ol {
+  margin: 0.2em 0;
+}
+
+/* task list items */
+.prose-doc li:has(> input[type="checkbox"]) {
+  list-style: none;
+}
+.prose-doc li:has(> input[type="checkbox"])::before {
+  display: none;
+}
+.prose-doc input[type="checkbox"] {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0 8px 0 -1.45em;
+  vertical-align: -2px;
+  border: 1.5px solid var(--color-line);
+  border-radius: 4px;
+  background: var(--color-panel-2);
+  cursor: pointer;
+  transition:
+    background 150ms var(--ease-out-expo),
+    border-color 150ms var(--ease-out-expo);
+}
+.prose-doc input[type="checkbox"]:checked {
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2 5 8.7 9.5 3.6' fill='none' stroke='%23221607' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size: 10px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+[data-theme="light"] .prose-doc input[type="checkbox"]:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2 5 8.7 9.5 3.6' fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.prose-doc li:has(> input[type="checkbox"]:checked) {
+  color: var(--color-ink-2);
+  text-decoration: line-through;
+  text-decoration-color: var(--color-ink-3);
+}
+
+.prose-doc blockquote {
+  margin: 0.8em 0;
+  padding: 0.1em 0 0.1em 1.1em;
+  border-left: 2px solid var(--color-accent-line);
+  color: var(--color-ink-2);
+}
+
+.prose-doc code:not(pre code) {
+  font-family: var(--font-mono);
+  font-size: 0.845em;
+  padding: 0.15em 0.38em;
+  border-radius: 5px;
+  background: var(--color-elev);
+  border: 1px solid var(--color-line-soft);
+  color: var(--color-accent-2);
+}
+
+.prose-doc pre {
+  margin: 0.9em 0;
+  padding: 14px 16px;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--color-line-soft);
+  background: var(--color-panel);
+  overflow-x: auto;
+}
+.prose-doc pre code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--color-ink);
+}
+
+.prose-doc hr {
+  border: none;
+  border-top: 1px solid var(--color-line);
+  margin: 1.6em 0;
+}
+
+.prose-doc table {
+  width: 100%;
+  margin: 0.9em 0;
+  border-collapse: collapse;
+  font-size: 0.92em;
+}
+.prose-doc th,
+.prose-doc td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-line-soft);
+}
+.prose-doc th {
+  color: var(--color-ink-2);
+  font-weight: 500;
+  font-size: 0.85em;
+  letter-spacing: 0.04em;
+}
+
+.prose-doc strong {
+  font-weight: 620;
+  color: var(--color-ink);
+}

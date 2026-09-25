@@ -1,0 +1,178 @@
+CoTenk – Was gemacht wurde (Stand 24.09.2026)
+================================================
+
+Ausführlichere Produkt-Gedanken und alle Ideen, die bewusst NICHT umgesetzt
+wurden, stehen in PRODUKT-NOTIZEN.md.
+
+
+1. NEUE FUNKTIONEN
+------------------
+
+Befehlspalette (Ctrl+K)
+- Durchsucht Titel und Inhalte aller Seiten (mit Textausschnitt).
+- Aktionen: neue Seite/Ordner, Vorlagen, Build with AI, Navigation, Theme.
+- "Ask the agent: ..." direkt aus der Suche, inklusive Modellauswahl.
+- Der Such-Button in der Sidebar war vorher ohne Funktion.
+
+Agent im Workspace
+- "Ask agent"-Button auf jeder Seite: freie Anweisung oder Schnellaktionen
+  (Zusammenfassen, Weiterschreiben, Aufgaben extrahieren, interaktives
+  Diagramm, Überarbeiten). Man bleibt auf der Seite und sieht zu.
+- "Hand to agent" bei jedem Task: Der Agent erledigt ihn und hakt ihn ab.
+- Schwebende Aktivitäts-Anzeige: was der Agent gerade tut, mit Stop und
+  "Open chat".
+- Jeder Agent bekommt beim ersten Auftrag die Workspace-Regeln mit
+  (Dateiformat, Frontmatter, Embeds, Theme-Variablen, Task-Marker).
+  Das hält das Ökosystem offen für jeden ACP-Agent.
+- Seitenkontext: Der Agent bekommt Dateipfad und cotenk-id und arbeitet an
+  der echten Datei.
+- Modellauswahl überall, wo man dem Agent schreibt: Ask agent, Build with
+  AI, Befehlspalette (und wie bisher im Chat). Die Auswahl wird gespeichert
+  und gilt auch für "Hand to agent".
+- Agents-Seite: bessere Vorschläge, "Connect Devin CLI"-Button bei
+  fehlendem Setup.
+- Settings > Agents: Abschnitt "Open ecosystem" (Devin verfügbar; Claude
+  Code, Gemini CLI und Custom ACP als "Coming soon").
+- Settings > About: Übersicht der Tastenkürzel.
+
+Editor
+- Agent-Änderungen erscheinen live in der offenen Seite, mit "Undo" bzw.
+  Ctrl+Z.
+- Slash-Menü (/) erweitert: Table, Callout, Bar chart, Progress bars,
+  "Ask agent...". Die Labels sind jetzt einheitlich Englisch (deutsche
+  Suchbegriffe funktionieren weiter).
+- Embeds passen sich Hell/Dunkel an (--ck-* CSS-Variablen im iframe).
+- Neue Seite: leerer Titel mit Fokus, man kann sofort tippen.
+- Leere Seiten zeigen "Let the agent draft this page" und "Start from a
+  template".
+- @name und due:JJJJ-MM-TT werden als Chips angezeigt (Agents mit Blitz,
+  überfällige Tasks rot). In der Datei bleibt reines Markdown.
+
+Tasks
+- Owner und Fälligkeit direkt im Markdown: @name, due:JJJJ-MM-TT
+  (oder "📅 JJJJ-MM-TT").
+- Gruppierung "By page" oder "By date" (Overdue, Today, Next 7 days, Later,
+  No date).
+- Sidebar: "x overdue / y due today", Liste "People & agents" als Filter.
+- Quick-Add bleibt in Tasks. Standardfilter ist jetzt "Open".
+
+Marketplace (neu in der Rail)
+- Discover: 8 offizielle Vorlagen (Project brief, Meeting notes, Agent
+  handoff brief, KPI dashboard, Roadmap timeline, Focus session, Weekly
+  review, Decision log), 3 davon interaktiv. Dazu Community-Listings,
+  Kategorien, Suche und eine Vorschau mit echter Darstellung.
+- Publish: jede Seite als Snapshot veröffentlichen (vorerst nur kostenlos;
+  "Paid - coming soon" ist sichtbar, aber deaktiviert).
+- My listings: eigene Listings mit Install-Zähler, Unpublish.
+- Build with AI: Seite beschreiben, der Agent baut sie im Workspace.
+
+Home
+- Begrüßung mit echtem Namen (aus der E-Mail-Adresse), Hinweis auf
+  überfällige Tasks.
+- Schnellaktionen: New page, Ask agent, Templates, Build with AI.
+- "Get started"-Checkliste (4 Schritte, hakt sich selbst ab, ausblendbar).
+- Tasks mit Chips, letzte Agent-Chats.
+- Neue Welcome-Seite, die alle Funktionen zum Ausprobieren zeigt
+  (mit Live-Widget).
+
+Verwaltung
+- Ordner: umbenennen (Doppelklick oder Menü), "New page here", löschen mit
+  Undo.
+- Seitenmenü (Sidebar und Editor): Pin, Move to, Duplicate, Copy as
+  markdown, Publish, Delete mit Undo.
+- Toast-Meldungen mit Undo.
+- Rail neu sortiert; Suche und Settings unten; Avatar mit echtem Initial.
+- Shortcuts: Ctrl+K (Palette), Ctrl+\ (Sidebar).
+- Web-Version: klarer Hinweis, dass Agents nur in der Desktop-App laufen,
+  statt eines kryptischen Fehlers.
+
+
+2. BEHOBENE FEHLER
+------------------
+
+- Seiten verschwanden (Desktop, Windows): Der Datei-Sync verglich Pfade
+  mit "\" und "/" und hielt dadurch jede Datei für umbenannt. Er schrieb
+  sie neu, löschte danach dieselbe Datei, und die Seite verschwand. Das
+  betraf ALLE Seiten. Pfade werden jetzt normalisiert verglichen, und eine
+  gerade geschriebene Datei wird nie gelöscht.
+- Seiten verschwanden (Web und Desktop): Der Sync startete bei jedem
+  Supabase-Auth-Event neu (z. B. wenn man in den Tab zurückkehrt) und
+  verwarf dabei noch nicht hochgeladene Seiten. Er hängt jetzt nur noch an
+  der User-ID.
+- Leerer Titel wurde vom Datei-Sync während des Tippens zu "Untitled"
+  umbenannt.
+- Agent-Änderungen an einer offenen Seite wurden nicht angezeigt und beim
+  Weitertippen überschrieben.
+- Klicks in Sidebar-Menüs (auch auf den Hintergrund) öffneten ungewollt
+  die Seite oder den Chat.
+- Modell-Picker: Ein Klick auf ein Modell zeigte nur die Vorschau; Modelle
+  ohne Einstellungen konnte man gar nicht auswählen.
+- Nicht existierende CSS-Klassen (bg-input, border-line-2) ersetzt.
+
+
+3. DATENBANK (SUPABASE)
+-----------------------
+
+- Neue Migration: supabase/migrations/20260924_marketplace.sql
+  (Tabelle marketplace_listings, RLS, Install-Zähler). Ausgeführt und
+  geprüft: vorhanden.
+- NOCH ZU TUN: supabase/migrations/20260923_agent_chats.sql ausführen. Die
+  Tabellen agent_projects und agent_chats fehlen; ohne sie werden
+  Agent-Chats nicht gespeichert.
+- docs und folders sind vorhanden.
+- .mcp.json: Supabase-MCP-Server für dieses Projekt eingetragen. Nach
+  einem Neustart von Claude Code mit /mcp anmelden.
+
+
+4. NEUE / GEÄNDERTE DATEIEN (Auswahl)
+--------------------------------------
+
+Neu:
+  src/lib/agent-actions.ts, agent-context.ts, marketplace.ts,
+  task-actions.ts, templates.ts, toast.ts
+  src/components/market/ (market-view, market-nav, publish-dialog,
+  use-market-cards)
+  src/components/shell/command-palette.tsx, page-menu.tsx
+  src/components/editor/ask-agent.tsx, doc-preview.tsx
+  src/components/agents/agent-activity.tsx, model-select.tsx
+  src/components/tasks/task-row.tsx
+  src/components/ui/modal.tsx, toaster.tsx, styles.ts
+  supabase/migrations/20260924_marketplace.sql
+  PRODUKT-NOTIZEN.md, .mcp.json
+
+Stark geändert:
+  App.tsx, store.ts, tasks.ts, file-sync.ts, agent-store.ts, mock-docs.ts,
+  doc-editor.tsx, block.tsx, markdown.tsx, slash-items.ts, home-view.tsx,
+  tasks-view.tsx, tasks-nav.tsx, sidebar.tsx, icon-rail.tsx,
+  folder-section.tsx, doc-row.tsx, settings-view.tsx, agents-view.tsx,
+  model-picker.tsx, auth-gate.tsx, README.md
+
+Das Rust-Backend (src-tauri) wurde nicht geändert.
+
+
+5. GEPRÜFT / NICHT GEPRÜFT
+--------------------------
+
+Geprüft:
+- TypeScript, ESLint (0 Fehler, 0 Warnungen), Produktions-Build.
+- Im Browser durchgeklickt (mit temporärem Test-Aufbau ohne Login, danach
+  gelöscht): Palette, Slash-Menü, Chart-Embed, Ask agent, Modellauswahl,
+  Seitenmenü, externe Änderung mit Undo, Löschen mit Undo, Vorlage
+  installieren, Ordner anlegen/umbenennen/verschieben, Publish-Dialog,
+  Hell- und Dunkel-Theme.
+
+Nicht geprüft:
+- Der echte Devin-Agent in der Desktop-App.
+- Echtes Veröffentlichen im Marketplace mit Login.
+- Der Pfad-Fix in der laufenden Desktop-App: Die Logik habe ich mit echten
+  Windows-Pfaden getestet, bitte mit "npm run tauri:dev" ausprobieren.
+
+Nichts wurde committet.
+
+
+6. APP STARTEN
+--------------
+
+  npm install
+  npm run tauri:dev     Desktop-App mit Agent
+  npm run dev           nur Browser (http://localhost:1420), ohne Agent

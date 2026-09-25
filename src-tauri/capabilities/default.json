@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core window capabilities. The Devin ACP backend lives in app commands, so no extra plugin permissions are required.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:webview:default",
+    "dialog:default"
+  ]
+}
