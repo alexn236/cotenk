@@ -1,3 +1,41 @@
+CoTenk – Nachtrag 25.09.2026: Fusion im Modell-Picker
+======================================================
+
+Problem: Devin liefert 335 Fusion-Kombinationen als flache Liste
+("Fusion (GPT-6 Sol Low Thinking + GLM-5.2 High)" usw.). Der Picker hat
+jede als eigenen Eintrag gezeigt – unbrauchbar.
+
+Jetzt (wie in Devin Desktop):
+- Ein Eintrag "Fusion", ganz oben in der Liste.
+- Rechts vier Einstellungen: Lead (6 Modelle), Effort, Sidekick (nur die,
+  die es für den Lead gibt) und Fast Mode. Änderungen gelten sofort, das
+  Menü bleibt offen. Gibt es eine Kombination nicht, springt die Auswahl
+  auf die nächstpassende und zeigt ehrlich an, was gewählt ist.
+- Die Suche findet Fusion auch über Lead/Sidekick ("glm", "astra").
+- Kosten für alle Devin-Modelle: Balken von günstig bis teuer mit
+  Markierung für die Vorschau und das aktuelle Modell, darunter Input /
+  Cached input / Output pro 1M Tokens, bei Fusion zusätzlich für den
+  Sidekick.
+- Preise neu aus docs.devin.ai (modelCostData) erzeugt, nach Modell-ID
+  (src/lib/agent-pricing-data.json). Die alte Tabelle war unvollständig
+  (u. a. Opus 5.5, GPT-6 Sol/Luna fehlten) und wurde nirgends benutzt.
+- Buchstaben-Kacheln im hellen Theme besser lesbar.
+
+Offen / Entscheidung bei dir:
+- Welcher Tarif? Angezeigt werden Self-Serve-Preise. Dort sind SWE-2 und
+  GLM-5.2 gerade gratis (Aktion). Devin Desktop zeigt dir für GLM-5.2
+  $1.4 / $4.4 – das ist der Enterprise-Preis. Falls du Enterprise/Teams
+  hast: in src/lib/agent-pricing.ts PRICING_TIER auf "enterprise"
+  stellen (beide Tarife sind in den Daten). Eine Einstellung dafür habe
+  ich bewusst nicht gebaut.
+- Die Preise ändern sich; aktualisieren heißt modelCostData neu aus der
+  Doku ziehen (Kommentar in agent-pricing.ts).
+
+Geprüft: mit der echten Devin-Modellliste (583 Modelle, per ACP geholt)
+gruppiert und im Browser gerendert (hell/dunkel). Nicht geprüft: in der
+laufenden Desktop-App.
+
+
 CoTenk – Was gemacht wurde (Stand 25.09.2026)
 ================================================
 

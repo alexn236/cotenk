@@ -9,8 +9,8 @@ import { isDesktop } from "@/lib/workspace";
 import { ModelPicker } from "./model-picker";
 import { AgentSwitch, SetupDot } from "./agent-switch";
 
-const NOTE: Record<AgentKind, string> = {
-  devin: "same pricing as devin cli",
+/** Devin shows published prices in the picker; Claude bills via the plan. */
+const NOTE: Partial<Record<AgentKind, string>> = {
   claude: "billed through your claude plan or api key",
 };
 
