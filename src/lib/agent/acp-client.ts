@@ -7,19 +7,23 @@ import {
   resolveWorkspaceDir,
 } from "../workspace";
 import type { ModelOption } from "../agent-models";
+import { AGENTS, type AgentKind } from "../agents";
+import { installWorkspaceSkill } from "./workspace-skill";
 
 /**
- * ACP (Agent Client Protocol) client for `devin acp`.
- * Speaks newline-delimited JSON-RPC 2.0. The child process itself is
- * owned by the Rust side (src-tauri); this class keeps all session,
- * config-option and event-mapping logic in one place.
- * One process hosts one ACP session per chat (sessionId keyed by chat).
+ * ACP (Agent Client Protocol) client for the local agents — `devin acp`
+ * and the Claude Code ACP adapter. Speaks newline-delimited JSON-RPC 2.0.
+ * The child processes are owned by the Rust side (src-tauri); this class
+ * keeps all session, config-option and event-mapping logic in one place.
+ * One client (and process) per agent kind, one ACP session per chat
+ * (sessionId keyed by chat).
  */
 
 export type AgentEvent =
   | { type: "text"; text: string }
   | { type: "thought"; text: string }
-  | { type: "tool"; title: string; status: string }
+  /** `title` is null on updates that only carry a new status. */
+  | { type: "tool"; id: string | null; title: string | null; status: string }
   | { type: "plan"; text: string }
   | { type: "usage"; used: number; size: number }
   | { type: "done"; stopReason: string }
@@ -60,12 +64,11 @@ export type AcpBootstrap = {
   sessions: Record<string, string>;
 };
 
-class DevinAcp {
+class AcpClient {
   private nextId = 1;
   private pending = new Map<number | string, Pending>();
   private listeners = new Set<(e: AgentEvent) => void>();
   private running = false;
-  private listening = false;
   private starting: Promise<void> | null = null;
   private cwd: string | null = null;
   /** chatKey → acp sessionId */
@@ -79,6 +82,12 @@ class DevinAcp {
   busy = false;
   lastError: string | null = null;
 
+  constructor(readonly kind: AgentKind) {}
+
+  private get label() {
+    return AGENTS[this.kind].name;
+  }
+
   /** Status + model list for the UI; lazily boots the ACP process. */
   async bootstrap(): Promise<AcpBootstrap> {
     try {
@@ -90,7 +99,7 @@ class DevinAcp {
         currentModel: this.currentModel,
         busy: this.busy,
         lastError:
-          e instanceof Error ? e.message : "Agent unavailable",
+          e instanceof Error ? e.message : `${this.label} unavailable`,
         sessions: this.sessionMap(),
       };
     }
@@ -117,21 +126,23 @@ class DevinAcp {
 
   private async start(): Promise<void> {
     if (!isDesktop()) throw new Error(DESKTOP_ONLY_MESSAGE);
-    const apiKey =
-      apiKeyOverride() ?? (await invoke<string | null>("devin_api_key"));
-    if (!apiKey) {
-      throw new Error(
-        "No Devin credentials found — connect Devin CLI in Settings → Agents.",
-      );
+    // Devin authenticates over ACP with the CLI's stored key; Claude Code
+    // reuses the `claude` login on this machine and needs no handshake.
+    let apiKey: string | null = null;
+    if (this.kind === "devin") {
+      apiKey =
+        apiKeyOverride() ?? (await invoke<string | null>("devin_api_key"));
+      if (!apiKey) {
+        throw new Error(
+          "No Devin credentials found — connect Devin CLI in Settings → Agents.",
+        );
+      }
     }
     // Listeners must be attached before the process emits anything.
-    if (!this.listening) {
-      this.listening = true;
-      void listen<string>("acp:line", (e) => this.onLine(e.payload));
-      void listen("acp:exit", () => this.reset("Devin CLI exited"));
-    }
+    await ensureListening();
     this.cwd = await resolveWorkspaceDir();
-    await invoke("acp_spawn", { dir: this.cwd });
+    await installWorkspaceSkill(this.cwd);
+    await invoke("acp_spawn", { agent: this.kind, dir: this.cwd });
     this.running = true;
 
     await this.request("initialize", {
@@ -139,14 +150,16 @@ class DevinAcp {
       clientCapabilities: {},
       clientInfo: { name: "cotenk", version: "0.1.0" },
     });
-    await this.request("authenticate", {
-      methodId: "devin-browser",
-      _meta: { api_key: apiKey },
-    });
+    if (apiKey) {
+      await this.request("authenticate", {
+        methodId: "devin-browser",
+        _meta: { api_key: apiKey },
+      });
+    }
     this.lastError = null;
   }
 
-  private reset(reason: string) {
+  reset(reason: string) {
     this.running = false;
     this.sessions.clear();
     this.appliedModels.clear();
@@ -158,7 +171,12 @@ class DevinAcp {
     this.pending.clear();
   }
 
-  private onLine(line: string) {
+  /** The backend reported that the process ended. */
+  onExit() {
+    if (this.running) this.reset(`${this.label} exited`);
+  }
+
+  onLine(line: string) {
     const trimmed = line.trim();
     if (!trimmed) return;
     let msg: JsonRpcMsg;
@@ -184,9 +202,20 @@ class DevinAcp {
       const p = this.pending.get(msg.id!);
       this.pending.delete(msg.id!);
       if (!p) return;
-      if (msg.error) p.reject(new Error(msg.error.message));
+      if (msg.error) p.reject(new Error(this.explain(msg.error)));
       else p.resolve(msg.result);
     }
+  }
+
+  /** Turns protocol errors into something a person can act on. */
+  private explain(err: { code: number; message: string }): string {
+    // -32000 is ACP's authRequired.
+    if (err.code === -32000 || /auth(entication)? required/i.test(err.message)) {
+      return this.kind === "claude"
+        ? "Claude Code is not signed in — connect it in Settings → Agents."
+        : "Devin CLI is not signed in — connect it in Settings → Agents.";
+    }
+    return err.message;
   }
 
   /** Agent → client requests. Permissions are auto-approved (allow_once). */
@@ -209,6 +238,7 @@ class DevinAcp {
     const u = msg.params?.update as
       | {
           sessionUpdate?: string;
+          toolCallId?: string;
           content?: { type?: string; text?: string };
           title?: string;
           status?: string;
@@ -234,8 +264,9 @@ class DevinAcp {
       case "tool_call_update":
         emit({
           type: "tool",
-          title: u.title ?? "tool",
-          status: u.status ?? "running",
+          id: u.toolCallId ?? null,
+          title: u.title ?? null,
+          status: u.status ?? "pending",
         });
         break;
       case "plan":
@@ -274,7 +305,10 @@ class DevinAcp {
 
   private send(msg: Record<string, unknown>) {
     if (!this.running) return;
-    void invoke("acp_write", { line: JSON.stringify(msg) }).catch((e) => {
+    void invoke("acp_write", {
+      agent: this.kind,
+      line: JSON.stringify(msg),
+    }).catch((e) => {
       this.reset(e instanceof Error ? e.message : String(e));
     });
   }
@@ -348,7 +382,7 @@ class DevinAcp {
     model: string | undefined,
     onEvent: (e: AgentEvent) => void,
   ): Promise<void> {
-    if (this.busy) throw new Error("Agent is already running a turn.");
+    if (this.busy) throw new Error(`${this.label} is already running a turn.`);
     const sessionId = await this.ensureSession(chatKey, model);
     this.busy = true;
     const listener = (e: AgentEvent) => onEvent(e);
@@ -378,17 +412,53 @@ class DevinAcp {
     }
   }
 
-  /** Terminate the devin acp subprocess (app shutdown, relogin). */
+  /** Terminate the agent subprocess (relogin, new API key). */
   async kill() {
-    this.reset("killed");
-    await invoke("acp_kill").catch(() => {});
+    this.reset("stopped");
+    await invoke("acp_kill", { agent: this.kind }).catch(() => {});
   }
 }
 
-// Survive Vite HMR: keep one client (and its session map) across
-// module reloads; drop the singleton if its shape is stale.
-const g = globalThis as unknown as { __cotenkAcp?: DevinAcp };
-if (g.__cotenkAcp && typeof g.__cotenkAcp.ensureSession !== "function") {
-  g.__cotenkAcp = undefined;
+// Survive Vite HMR: keep one client per agent (and its session map)
+// across module reloads; drop the registry if its shape is stale.
+const g = globalThis as unknown as {
+  __cotenkAcpClients?: Map<AgentKind, AcpClient>;
+  __cotenkAcpListening?: Promise<void>;
+};
+if (
+  g.__cotenkAcpClients &&
+  [...g.__cotenkAcpClients.values()].some(
+    (c) => typeof c.onExit !== "function",
+  )
+) {
+  g.__cotenkAcpClients = undefined;
 }
-export const devinAcp = (g.__cotenkAcp ??= new DevinAcp());
+const clients = (g.__cotenkAcpClients ??= new Map<AgentKind, AcpClient>());
+
+export function acpClient(kind: AgentKind): AcpClient {
+  let c = clients.get(kind);
+  if (!c) {
+    c = new AcpClient(kind);
+    clients.set(kind, c);
+  }
+  return c;
+}
+
+/** Stops every agent — e.g. the workspace folder changed. */
+export async function killAllAgents() {
+  for (const c of clients.values()) c.reset("stopped");
+  await invoke("acp_kill", {}).catch(() => {});
+}
+
+/** One pair of backend listeners, routed to the client by agent id.
+ *  Looks clients up through the global registry so routing survives HMR. */
+function ensureListening(): Promise<void> {
+  return (g.__cotenkAcpListening ??= Promise.all([
+    listen<{ agent: AgentKind; line: string }>("acp:line", (e) =>
+      g.__cotenkAcpClients?.get(e.payload.agent)?.onLine(e.payload.line),
+    ),
+    listen<AgentKind>("acp:exit", (e) =>
+      g.__cotenkAcpClients?.get(e.payload)?.onExit(),
+    ),
+  ]).then(() => undefined));
+}

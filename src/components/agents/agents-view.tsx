@@ -2,9 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
-  CaretDown,
   Check,
-  Cpu,
+  CircleNotch,
   Folder,
   Lightning,
   PaperPlaneRight,
@@ -12,17 +11,22 @@ import {
   PushPin,
   Square,
   Trash,
+  Warning,
   Wrench,
 } from "@phosphor-icons/react";
 import {
   useActiveChat,
   useAgent,
+  type AgentMsg,
   type AgentStatus,
 } from "@/lib/agent-store";
+import { useAgentSetup } from "@/lib/agent-setup";
+import { AGENTS } from "@/lib/agents";
 import { Markdown } from "@/components/editor/markdown";
 import { useWorkspace } from "@/lib/store";
 import { DESKTOP_ONLY_MESSAGE, isDesktop } from "@/lib/workspace";
-import { ModelPicker } from "./model-picker";
+import { ModelSelect } from "./model-select";
+import { AgentSwitch } from "./agent-switch";
 
 const SUGGESTIONS = [
   "Summarize what this workspace contains",
@@ -51,41 +55,45 @@ function formatK(n: number): string {
 }
 
 /**
- * Agents view — chat surface wired to the local `devin acp` process
- * (via the Tauri backend). Chats persist to Supabase and can be
- * pinned or filed under projects from the header bar.
+ * Agents view — chat surface wired to the local ACP agents (Devin CLI,
+ * Claude Code) via the Tauri backend. Chats persist to Supabase and can
+ * be pinned or filed under projects from the header bar.
  */
 export function AgentsView() {
   const status = useAgent((s) => s.status);
   const error = useAgent((s) => s.error);
+  const errorAgent = useAgent((s) => s.errorAgent);
   const thought = useAgent((s) => s.thought);
   const usage = useAgent((s) => s.usage);
-  const models = useAgent((s) => s.models);
   const projects = useAgent((s) => s.projects);
+  const runningChatId = useAgent((s) => s.runningChatId);
+  const defaultAgent = useAgent((s) => s.defaultAgent);
+  const setDefaultAgent = useAgent((s) => s.setDefaultAgent);
+  const setChatAgent = useAgent((s) => s.setChatAgent);
   const send = useAgent((s) => s.send);
   const stop = useAgent((s) => s.stop);
   const refresh = useAgent((s) => s.refresh);
   const renameChat = useAgent((s) => s.renameChat);
   const deleteChat = useAgent((s) => s.deleteChat);
+  const selectChat = useAgent((s) => s.selectChat);
   const togglePinChat = useAgent((s) => s.togglePinChat);
-  const setChatModel = useAgent((s) => s.setChatModel);
-  const defaultModel = useAgent((s) => s.defaultModel);
-  const setDefaultModel = useAgent((s) => s.setDefaultModel);
-  const currentModel = useAgent((s) => s.currentModel);
   const assignChat = useAgent((s) => s.assignChat);
   const chat = useActiveChat();
   const reduceMotion = useReducedMotion();
   const setRailSection = useWorkspace((s) => s.setRailSection);
   const setSettingsSection = useWorkspace((s) => s.setSettingsSection);
-  // Missing binary / credentials surface as bootstrap errors.
   const desktop = isDesktop();
-  const needsSetup =
-    status === "error" ||
-    (status === "idle" && !!error) ||
-    /credential|not found|spawn/i.test(error ?? "");
+
+  const agent = chat?.agent ?? defaultAgent;
+  const agentName = AGENTS[agent].name;
+  const setup = useAgentSetup((s) => s.setup[agent]);
+  const checkSetup = useAgentSetup((s) => s.check);
+  const connect = useAgentSetup((s) => s.connect);
+  const connecting = useAgentSetup((s) => s.connecting);
+  const ready = !!setup && setup.installed && setup.authed;
 
   const [input, setInput] = useState("");
-  const [menu, setMenu] = useState<"model" | "project" | null>(null);
+  const [menu, setMenu] = useState<"project" | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -93,23 +101,25 @@ export function AgentsView() {
   const titleRef = useRef<HTMLInputElement | null>(null);
 
   const running = status === "running" || status === "starting";
-  const meta = statusMeta(status);
+  // One turn at a time: another chat's turn blocks this composer.
+  const busyElsewhere = running && !!runningChatId && runningChatId !== chat?.id;
+  const runningHere = running && !busyElsewhere;
+  const meta = statusMeta(busyElsewhere ? "ready" : status);
   const messages = useMemo(() => chat?.messages ?? [], [chat]);
-  const activeModel = chat?.model ?? defaultModel;
-  const effectiveModel = activeModel || currentModel || "";
-  const modelName = effectiveModel
-    ? (models.find((m) => m.value === effectiveModel)?.name ??
-      effectiveModel)
-    : "Model";
+  const chatError =
+    error && (errorAgent === null || errorAgent === agent) ? error : null;
+  const last = messages.at(-1);
+  const showWorking =
+    runningHere && !(last?.role === "agent" && last.streaming);
 
-  const pickModel = (value: string) => {
-    if (chat) setChatModel(chat.id, value);
-    else setDefaultModel(value);
-  };
-
+  // Probe the agent and preload its models (the default model works
+  // without them, so this only runs when the agent is ready).
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (!desktop) return;
+    void checkSetup(agent).then((s) => {
+      if (s?.installed && s.authed) void refresh(agent);
+    });
+  }, [desktop, agent, checkSetup, refresh]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -138,6 +148,11 @@ export function AgentsView() {
   const commitTitle = () => {
     if (chat && titleDraft.trim()) renameChat(chat.id, titleDraft.trim());
     setEditingTitle(false);
+  };
+
+  const openAgentSettings = () => {
+    setSettingsSection("agents");
+    setRailSection("settings");
   };
 
   const iconBtn =
@@ -178,9 +193,12 @@ export function AgentsView() {
             Agents
           </span>
         )}
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-panel-2 px-2 py-0.5 text-[11px] text-ink-3">
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full border border-line bg-panel-2 px-2 py-0.5 text-[11px] text-ink-3"
+          title={`${agentName} · ${meta.label}`}
+        >
           <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
-          {meta.label}
+          {agentName}
         </span>
 
         <div className="ml-auto flex items-center gap-1">
@@ -274,12 +292,12 @@ export function AgentsView() {
               </div>
               <div>
                 <p className="text-sm font-medium text-ink-2">
-                  Devin CLI · your workspace agent
+                  Your workspace agent
                 </p>
-                <p className="mt-1.5 max-w-[380px] text-[12.5px] leading-relaxed text-ink-3">
-                  Runs locally over ACP and reads and writes the same pages
-                  you do. Ask it to draft, restructure, extract tasks or
-                  build interactive widgets.
+                <p className="mt-1.5 max-w-[400px] text-[12.5px] leading-relaxed text-ink-3">
+                  Runs locally and reads and writes the same pages you do.
+                  Ask it to draft, restructure, extract tasks or build
+                  interactive widgets — you watch the changes land.
                 </p>
               </div>
               {!desktop ? (
@@ -287,26 +305,59 @@ export function AgentsView() {
                   {DESKTOP_ONLY_MESSAGE} Pages, tasks and the marketplace
                   work everywhere.
                 </p>
-              ) : needsSetup && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSettingsSection("agents");
-                    setRailSection("settings");
-                  }}
-                  className="flex h-8 items-center gap-1.5 rounded-[8px] bg-accent px-3 text-[12.5px] font-medium text-on-accent transition-colors hover:bg-accent-2"
-                >
-                  <Plugs size={14} />
-                  Connect Devin CLI
-                </button>
+              ) : (
+                <div className="flex w-full max-w-[360px] flex-col items-center gap-2">
+                  <div className="w-full">
+                    <AgentSwitch
+                      value={agent}
+                      onChange={(k) =>
+                        chat ? setChatAgent(chat.id, k) : setDefaultAgent(k)
+                      }
+                    />
+                  </div>
+                  <p className="text-[11.5px] text-ink-3">
+                    {setup ? `${agentName} · ${setup.detail}` : "Checking…"}
+                  </p>
+                  {setup && !ready && (
+                    <div className="flex flex-col items-center gap-2">
+                      {setup.hint && (
+                        <p className="max-w-[340px] text-[12px] leading-relaxed text-ink-3">
+                          {setup.hint}
+                        </p>
+                      )}
+                      {setup.installed ? (
+                        <button
+                          type="button"
+                          disabled={!!connecting}
+                          onClick={() => void connect(agent)}
+                          className="flex h-8 items-center gap-1.5 rounded-[8px] bg-accent px-3 text-[12.5px] font-medium text-on-accent transition-colors hover:bg-accent-2 disabled:opacity-60"
+                        >
+                          <Plugs size={14} />
+                          {connecting === agent
+                            ? "Waiting for sign-in…"
+                            : `Connect ${agentName}`}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={openAgentSettings}
+                          className="text-[12px] text-accent hover:underline"
+                        >
+                          Setup help in Settings → Agents
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
               <div className="flex flex-wrap items-center justify-center gap-1.5">
                 {SUGGESTIONS.map((s) => (
                   <button
                     key={s}
                     type="button"
+                    disabled={running}
                     onClick={() => void send(s)}
-                    className="rounded-full border border-line bg-panel px-3 py-1.5 text-[12px] text-ink-2 transition-colors duration-150 ease-out-expo hover:bg-hover hover:text-ink"
+                    className="rounded-full border border-line bg-panel px-3 py-1.5 text-[12px] text-ink-2 transition-colors duration-150 ease-out-expo hover:bg-hover hover:text-ink disabled:opacity-50"
                   >
                     {s}
                   </button>
@@ -317,48 +368,51 @@ export function AgentsView() {
 
           {messages.map((m) => {
             if (m.role === "tool") {
-              return (
-                <div
-                  key={m.id}
-                  className="flex items-center gap-2 px-1 font-mono text-[11.5px] text-ink-3"
-                >
-                  <Wrench size={12} className="shrink-0 text-accent" />
-                  <span className="truncate">{m.text}</span>
-                </div>
-              );
+              return <ToolRow key={m.id} msg={m} live={runningHere} />;
             }
             if (m.role === "user") {
               return (
                 <div key={m.id} className="flex justify-end">
-                  <div className="max-w-[80%] rounded-[12px] border border-line-soft bg-panel-2 px-3.5 py-2 text-[14px] leading-[1.6] text-ink">
+                  <div className="max-w-[80%] whitespace-pre-wrap rounded-[12px] border border-line-soft bg-panel-2 px-3.5 py-2 text-[14px] leading-[1.6] text-ink">
                     {m.text}
                   </div>
                 </div>
               );
             }
-            return (
+            return m.text ? (
               <div key={m.id} className="min-w-0">
-                {m.text ? (
-                  <Markdown>{m.text}</Markdown>
-                ) : m.streaming ? (
-                  <span className="inline-flex items-center gap-1.5 text-[13px] text-ink-3">
-                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-                    Working…
-                  </span>
-                ) : null}
+                <Markdown>{m.text}</Markdown>
               </div>
-            );
+            ) : null;
           })}
 
-          {thought && running && (
-            <p className="truncate px-1 font-mono text-[11px] italic text-ink-3">
-              {thought.slice(-160)}
+          {showWorking && (
+            <p className="flex min-w-0 items-center gap-1.5 px-1 text-[12.5px] text-ink-3">
+              <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />
+              {status === "starting" ? (
+                `Starting ${agentName}…`
+              ) : thought ? (
+                <span className="truncate font-mono text-[11px] italic">
+                  {thought.slice(-160)}
+                </span>
+              ) : (
+                "Working…"
+              )}
             </p>
           )}
-          {error && desktop && (
-            <p className="rounded-[8px] border border-line bg-panel-2 px-3 py-2 text-[12.5px] text-danger">
-              {error}
-            </p>
+          {chatError && desktop && (
+            <div className="flex items-start justify-between gap-3 rounded-[8px] border border-line bg-panel-2 px-3 py-2 text-[12.5px] text-danger">
+              <span className="min-w-0">{chatError}</span>
+              {/sign|credential|not found|install/i.test(chatError) && (
+                <button
+                  type="button"
+                  onClick={openAgentSettings}
+                  className="shrink-0 text-[12px] text-accent hover:underline"
+                >
+                  Open settings
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -366,6 +420,16 @@ export function AgentsView() {
       {/* composer */}
       <div className="shrink-0 border-t border-line-soft px-6 pb-5 pt-3 md:px-16">
         <div className="mx-auto w-full max-w-[720px]">
+          {busyElsewhere && (
+            <button
+              type="button"
+              onClick={() => runningChatId && selectChat(runningChatId)}
+              className="mb-2 flex w-full items-center justify-center gap-1.5 text-[11.5px] text-ink-3 hover:text-ink-2"
+            >
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+              An agent is working in another chat — open it
+            </button>
+          )}
           <div className="flex items-end gap-2 rounded-[12px] border border-line bg-panel px-3 py-2 shadow-[0_2px_12px_var(--color-shadow)] transition-colors duration-150 focus-within:border-accent-line">
             <textarea
               ref={inputRef}
@@ -378,44 +442,14 @@ export function AgentsView() {
                 el.style.height = `${el.scrollHeight}px`;
               }}
               onKeyDown={onComposerKey}
-              placeholder="Message Devin…"
-              aria-label="Message Devin"
+              placeholder={`Message ${agentName}…`}
+              aria-label={`Message ${agentName}`}
               spellCheck={false}
               className="block max-h-[180px] w-full resize-none bg-transparent py-1 text-[14px] leading-[1.6] text-ink outline-none placeholder:text-ink-3"
             />
-            {/* model picker — opens upward */}
-            <div className="relative shrink-0">
-              <button
-                type="button"
-                onClick={() =>
-                  setMenu((m) => (m === "model" ? null : "model"))
-                }
-                title="Select model"
-                className="flex h-8 items-center gap-1.5 rounded-[8px] border border-line bg-panel-2 px-2 text-[11.5px] text-ink-2 transition-colors duration-150 hover:bg-hover"
-              >
-                <Cpu size={13} className="text-ink-3" />
-                <span className="max-w-[130px] truncate">{modelName}</span>
-                <CaretDown size={10} className="text-ink-3" />
-              </button>
-              <AnimatePresence>
-                {menu === "model" && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-30 cursor-default"
-                      onClick={() => setMenu(null)}
-                    />
-                    <ModelPicker
-                      models={models}
-                      active={activeModel}
-                      onPick={pickModel}
-                      onClose={() => setMenu(null)}
-                    />
-                  </>
-                )}
-              </AnimatePresence>
-            </div>
+            <ModelSelect chatId={chat?.id} placement="up" size="md" />
 
-            {running ? (
+            {runningHere ? (
               <button
                 type="button"
                 onClick={stop}
@@ -429,9 +463,9 @@ export function AgentsView() {
               <button
                 type="button"
                 onClick={submit}
-                disabled={!input.trim()}
+                disabled={!input.trim() || running}
                 aria-label="Send"
-                title="Send"
+                title="Send (Enter)"
                 className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] bg-accent text-on-accent transition-[background-color,transform] duration-150 ease-out-expo hover:bg-accent-2 active:scale-[0.97] disabled:opacity-35"
               >
                 <PaperPlaneRight size={15} weight="fill" />
@@ -439,8 +473,11 @@ export function AgentsView() {
             )}
           </div>
           <p className="mt-2 flex items-center justify-center gap-3 text-center font-mono text-[10.5px] text-ink-3">
-            <span>devin acp · permissions auto-approved</span>
-            {usage && usage.size > 0 && (
+            <span>
+              {agent === "claude" ? "claude code" : "devin"} · acp · edits
+              auto-approved, undo with ctrl z on the page
+            </span>
+            {usage && usage.size > 0 && runningChatId === null && (
               <span>
                 ctx {formatK(usage.used)}/{formatK(usage.size)}
               </span>
@@ -448,6 +485,26 @@ export function AgentsView() {
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** One tool call; updates of the same call edit this row in place. */
+function ToolRow({ msg, live }: { msg: AgentMsg; live: boolean }) {
+  const pending = msg.status === "pending" || msg.status === "in_progress";
+  const failed = msg.status === "failed";
+  return (
+    <div className="flex items-center gap-2 px-1 font-mono text-[11.5px] text-ink-3">
+      {pending && live ? (
+        <CircleNotch size={12} className="shrink-0 animate-spin text-accent" />
+      ) : failed ? (
+        <Warning size={12} className="shrink-0 text-danger" />
+      ) : msg.status ? (
+        <Check size={12} className="shrink-0 text-accent" />
+      ) : (
+        <Wrench size={12} className="shrink-0 text-accent" />
+      )}
+      <span className="truncate">{msg.text}</span>
     </div>
   );
 }

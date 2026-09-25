@@ -2,6 +2,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowRight, Lightning, Square, Warning } from "@phosphor-icons/react";
 import { useActiveChat, useAgent } from "@/lib/agent-store";
 import { useWorkspace } from "@/lib/store";
+import { AGENTS } from "@/lib/agents";
 
 /**
  * Floating status pill shown outside the Agents view while an agent turn
@@ -12,7 +13,14 @@ export function AgentActivity() {
   const status = useAgent((s) => s.status);
   const error = useAgent((s) => s.error);
   const stop = useAgent((s) => s.stop);
-  const chat = useActiveChat();
+  const selectChat = useAgent((s) => s.selectChat);
+  const runningChat = useAgent((s) =>
+    s.runningChatId
+      ? (s.chats.find((c) => c.id === s.runningChatId) ?? null)
+      : null,
+  );
+  const activeChat = useActiveChat();
+  const chat = runningChat ?? activeChat;
   const rail = useWorkspace((s) => s.railSection);
   const setRail = useWorkspace((s) => s.setRailSection);
   const reduceMotion = useReducedMotion();
@@ -20,6 +28,7 @@ export function AgentActivity() {
   const running = status === "running" || status === "starting";
   const failed = status === "error" && !!error;
   const visible = rail !== "agents" && (running || failed);
+  const name = chat ? AGENTS[chat.agent].name : "Agent";
 
   // Latest tool call is the most honest "what is it doing" line.
   const lastTool = chat?.messages.filter((m) => m.role === "tool").at(-1)
@@ -27,7 +36,7 @@ export function AgentActivity() {
   const line = failed
     ? error
     : status === "starting"
-      ? "Starting agent…"
+      ? "Starting…"
       : (lastTool ?? "Thinking…");
 
   return (
@@ -50,7 +59,7 @@ export function AgentActivity() {
             </span>
           )}
           <span className="shrink-0 font-medium text-ink">
-            {failed ? "Agent stopped" : "Agent working"}
+            {failed ? `${name} stopped` : `${name} working`}
           </span>
           <span className="min-w-0 truncate font-mono text-[11px] text-ink-3">
             {line}
@@ -68,7 +77,10 @@ export function AgentActivity() {
           )}
           <button
             type="button"
-            onClick={() => setRail("agents")}
+            onClick={() => {
+              if (chat) selectChat(chat.id);
+              setRail("agents");
+            }}
             className="flex h-6 shrink-0 items-center gap-1 rounded-full bg-panel-2 px-2.5 text-[11.5px] text-ink-2 transition-colors hover:bg-hover hover:text-ink"
           >
             Open chat

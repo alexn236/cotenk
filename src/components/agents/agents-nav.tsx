@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
+import { AGENTS } from "@/lib/agents";
 import {
   CaretRight,
   ChatCircle,
@@ -139,6 +140,7 @@ export function AgentsNav() {
 
 function ChatRow({ chat, index = 0 }: { chat: AgentChat; index?: number }) {
   const active = useAgent((s) => s.activeChatId === chat.id);
+  const running = useAgent((s) => s.runningChatId === chat.id);
   const selectChat = useAgent((s) => s.selectChat);
   const togglePinChat = useAgent((s) => s.togglePinChat);
   const deleteChat = useAgent((s) => s.deleteChat);
@@ -193,6 +195,19 @@ function ChatRow({ chat, index = 0 }: { chat: AgentChat; index?: number }) {
       <span className="flex-1 truncate">
         {chat.title.trim() === "" ? "New chat" : chat.title}
       </span>
+      {running ? (
+        <span
+          title={`${AGENTS[chat.agent].name} is working`}
+          className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent"
+        />
+      ) : (
+        <span
+          title={AGENTS[chat.agent].name}
+          className={`shrink-0 font-mono text-[10px] text-ink-3 ${menu ? "hidden" : "group-hover:hidden"}`}
+        >
+          {chat.agent}
+        </span>
+      )}
       <button
         ref={dotsRef}
         type="button"

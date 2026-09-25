@@ -401,7 +401,7 @@ function GettingStarted() {
       },
     },
     {
-      label: "Give a task an owner — @you or @devin",
+      label: "Give a task an owner — @you, @claude or @devin",
       done: extractTasks(docs.filter((d) => !seedIds.has(d.id))).some(
         (t) => t.assignees.length > 0,
       ),

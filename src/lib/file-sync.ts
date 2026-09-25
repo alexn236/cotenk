@@ -110,7 +110,10 @@ function sameTitle(fileTitle: string | null, docTitle: string): boolean {
   );
 }
 
-function parseFile(path: string, mtime: number, raw: string): Scanned {
+function parseFile(path: string, mtime: number, text: string): Scanned {
+  // Agents on Windows may write CRLF or a BOM; without normalizing, the
+  // frontmatter doesn't match and the page gets re-adopted under a new id.
+  const raw = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
   const m = raw.match(FM_RE);
   if (!m) {
     return {
@@ -214,7 +217,11 @@ async function reconcile() {
 
       const folderFor = (name: string | null): string | null => {
         if (!name) return null;
-        const existing = folderIdByName.get(name.toLowerCase());
+        // Match the display name or its directory slug ("q3-plans" for
+        // "Q3 Plans"), so a page dropped into that folder joins it.
+        const existing =
+          folderIdByName.get(name.toLowerCase()) ??
+          folders.find((x) => slug(x.name) === slug(name))?.id;
         if (existing) return existing;
         const f: Folder = { id: `fld-${Date.now().toString(36)}-${folders.length}`, name };
         folders = [...folders, f];
@@ -266,7 +273,10 @@ async function reconcile() {
           // Foreign markdown file (agent/user dropped it in) — adopt.
           const stem =
             f.path.split(/[\\/]/).pop()?.replace(/\.md$/i, "") ?? "Untitled";
-          const h1 = f.content.match(/^#\s+(.+)$/m)?.[1]?.trim();
+          // A leading "# Title" becomes the page title — drop it from the
+          // body, or the editor shows the title twice.
+          const lead = f.content.match(/^\s*#\s+(.+)\n*/);
+          const h1 = (lead?.[1] ?? f.content.match(/^#\s+(.+)$/m)?.[1])?.trim();
           const parentDir = f.path.replace(/[\\/][^\\/]+$/, "");
           const inSubdir =
             parentDir.replace(/\\/g, "/") !== root.replace(/\\/g, "/");
@@ -275,7 +285,7 @@ async function reconcile() {
             id: `doc-${Date.now().toString(36)}-${adoptedPaths.size}`,
             folderId: folderFor(dirName ?? null),
             title: h1 || stem,
-            content: f.content,
+            content: lead ? f.content.slice(lead[0].length) : f.content,
             pinned: false,
             updatedAt: f.mtime || Date.now(),
           };

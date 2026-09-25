@@ -1,36 +1,52 @@
 //! CoTenk desktop backend.
 //!
-//! Owns the local `devin acp` subprocess (newline-delimited JSON-RPC over
-//! stdio) and exposes it to the webview via commands + events:
+//! Owns the local ACP agent subprocesses (newline-delimited JSON-RPC over
+//! stdio) — one per agent kind (`devin acp`, the Claude Code ACP adapter)
+//! — and exposes them to the webview via commands + events:
 //!
 //!   commands: acp_spawn / acp_write / acp_kill / devin_api_key /
-//!             devin_status / devin_login / workspace_dir /
-//!             fs_read / fs_write / fs_remove / fs_list_md /
-//!             fs_watch / fs_unwatch / open_folder
-//!   events:   "acp:line" (stdout line), "acp:exit" (process ended),
+//!             devin_status / devin_login / claude_status / claude_login /
+//!             workspace_dir / fs_read / fs_write / fs_remove /
+//!             fs_list_md / fs_watch / fs_unwatch / open_folder
+//!   events:   "acp:line" ({agent, line} per stdout line),
+//!             "acp:exit" (id of the agent whose process ended),
 //!             "ws:fs" (paths changed inside the watched workspace)
 //!
 //! All ACP/JSON-RPC logic stays in the frontend; this side is a dumb,
 //! reliable pipe plus local file/credential helpers.
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use notify::{RecursiveMode, Watcher};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 struct AcpProcess {
     child: Child,
     stdin: ChildStdin,
+    /// Distinguishes a respawned process from the one it replaced, so a
+    /// late exit of the old one doesn't tear down the new session.
+    generation: u64,
 }
 
 struct WatchState(Mutex<Option<notify::RecommendedWatcher>>);
 
+/// agent id ("devin" | "claude") → its running process
 #[derive(Default)]
-struct AcpState(Mutex<Option<AcpProcess>>);
+struct AcpState(Mutex<HashMap<String, AcpProcess>>);
+
+static GENERATION: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone, Serialize)]
+struct AcpLine {
+    agent: String,
+    line: String,
+}
 
 fn home_dir() -> String {
     std::env::var("USERPROFILE")
@@ -40,6 +56,88 @@ fn home_dir() -> String {
 
 fn devin_bin() -> String {
     std::env::var("DEVIN_CLI").unwrap_or_else(|_| "devin".to_string())
+}
+
+/// npm package of the Claude Code ACP adapter (formerly
+/// `@zed-industries/claude-code-acp`).
+const CLAUDE_ACP_PACKAGE: &str = "@agentclientprotocol/claude-agent-acp";
+
+/// `Command::new` doesn't consult PATHEXT on Windows, so npm's `.cmd`
+/// shims (claude, npx, claude-agent-acp) have to be named explicitly.
+fn bin_candidates(name: &str) -> Vec<String> {
+    if cfg!(windows) {
+        vec![
+            format!("{name}.cmd"),
+            format!("{name}.exe"),
+            name.to_string(),
+        ]
+    } else {
+        vec![name.to_string()]
+    }
+}
+
+/// A command that never flashes a console window on Windows.
+fn quiet_command(bin: &str) -> Command {
+    #[allow(unused_mut)]
+    let mut cmd = Command::new(bin);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+/// Stdout of the first candidate that runs successfully.
+fn run_first(bins: &[String], args: &[&str]) -> Option<String> {
+    bins.iter().find_map(|b| {
+        quiet_command(b)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    })
+}
+
+/// Launch candidates (binary, args) per agent, tried in order.
+fn agent_launchers(agent: &str) -> Result<Vec<(String, Vec<String>)>, String> {
+    match agent {
+        "devin" => {
+            let bin = devin_bin();
+            Ok(vec![
+                (bin.clone(), vec!["acp".into()]),
+                (format!("{bin}.exe"), vec!["acp".into()]),
+            ])
+        }
+        "claude" => {
+            let mut out = Vec::new();
+            if let Ok(bin) = std::env::var("CLAUDE_ACP_BIN") {
+                out.push((bin, vec![]));
+            }
+            // A globally installed adapter starts fastest; npx fetches it
+            // on first use.
+            for b in bin_candidates("claude-agent-acp") {
+                out.push((b, vec![]));
+            }
+            for b in bin_candidates("npx") {
+                out.push((b, vec!["-y".into(), CLAUDE_ACP_PACKAGE.into()]));
+            }
+            Ok(out)
+        }
+        other => Err(format!("unknown agent `{other}`")),
+    }
+}
+
+fn agent_label(agent: &str) -> &'static str {
+    match agent {
+        "claude" => "Claude Code",
+        _ => "Devin CLI",
+    }
 }
 
 /// Default workspace folder: ~/Documents/CoTenk (created on demand).
@@ -55,74 +153,127 @@ fn workspace_dir() -> String {
 }
 
 #[tauri::command]
-fn acp_spawn(app: AppHandle, state: State<AcpState>, dir: Option<String>) -> Result<(), String> {
+fn acp_spawn(
+    app: AppHandle,
+    state: State<AcpState>,
+    agent: String,
+    dir: Option<String>,
+) -> Result<(), String> {
     let mut guard = state.0.lock().map_err(|_| "state poisoned")?;
 
     // Reap a dead child before deciding we're already running.
-    if let Some(p) = guard.as_mut() {
+    if let Some(p) = guard.get_mut(&agent) {
         match p.child.try_wait() {
-            Ok(None) => return Ok(()),      // still running
+            Ok(None) => return Ok(()), // still running
             Ok(Some(_)) | Err(_) => {
-                let _ = guard.take();
+                guard.remove(&agent);
             }
         }
     }
 
-    let bin = devin_bin();
+    let launchers = agent_launchers(&agent)?;
     let dir = dir.unwrap_or_else(workspace_dir);
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create workspace dir: {e}"))?;
-    let try_spawn = |b: &str| {
-        Command::new(b)
-            .arg("acp")
+
+    let mut last_err = String::new();
+    let mut spawned = None;
+    for (bin, args) in &launchers {
+        match quiet_command(bin)
+            .args(args)
             .current_dir(&dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-    };
-    let mut child = try_spawn(&bin)
-        .or_else(|_| try_spawn(&format!("{bin}.exe")))
-        .map_err(|e| format!("failed to spawn `{bin} acp`: {e}"))?;
+        {
+            Ok(child) => {
+                spawned = Some(child);
+                break;
+            }
+            Err(e) => last_err = format!("{bin}: {e}"),
+        }
+    }
+    let mut child = spawned
+        .ok_or_else(|| format!("{} not found ({last_err})", agent_label(&agent)))?;
 
-    let stdin = child.stdin.take().ok_or("devin acp: no stdin")?;
-    let stdout = child.stdout.take().ok_or("devin acp: no stdout")?;
+    let stdin = child.stdin.take().ok_or("agent: no stdin")?;
+    let stdout = child.stdout.take().ok_or("agent: no stdout")?;
+    let generation = GENERATION.fetch_add(1, Ordering::Relaxed);
 
     let app2 = app.clone();
+    let agent2 = agent.clone();
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             match line {
                 Ok(l) if !l.trim().is_empty() => {
-                    let _ = app2.emit("acp:line", l);
+                    let _ = app2.emit(
+                        "acp:line",
+                        AcpLine {
+                            agent: agent2.clone(),
+                            line: l,
+                        },
+                    );
                 }
                 Ok(_) => {}
                 Err(_) => break,
             }
         }
-        let _ = app2.emit("acp:exit", ());
+        // Only report the exit if this process hasn't been replaced.
+        let current = app2
+            .state::<AcpState>()
+            .0
+            .lock()
+            .ok()
+            .and_then(|g| g.get(&agent2).map(|p| p.generation));
+        if current.is_none() || current == Some(generation) {
+            let _ = app2.emit("acp:exit", agent2);
+        }
     });
 
-    *guard = Some(AcpProcess { child, stdin });
+    guard.insert(
+        agent,
+        AcpProcess {
+            child,
+            stdin,
+            generation,
+        },
+    );
     Ok(())
 }
 
 #[tauri::command]
-fn acp_write(state: State<AcpState>, line: String) -> Result<(), String> {
+fn acp_write(state: State<AcpState>, agent: String, line: String) -> Result<(), String> {
     let mut guard = state.0.lock().map_err(|_| "state poisoned")?;
-    let p = guard.as_mut().ok_or("agent process not running")?;
+    let p = guard
+        .get_mut(&agent)
+        .ok_or_else(|| format!("{} is not running", agent_label(&agent)))?;
     p.stdin
         .write_all(line.as_bytes())
         .and_then(|_| p.stdin.write_all(b"\n"))
         .and_then(|_| p.stdin.flush())
-        .map_err(|e| format!("write to devin acp: {e}"))
+        .map_err(|e| format!("write to {}: {e}", agent_label(&agent)))
 }
 
+/// Stops one agent, or every agent when `agent` is omitted.
 #[tauri::command]
-fn acp_kill(state: State<AcpState>) -> Result<(), String> {
+fn acp_kill(state: State<AcpState>, agent: Option<String>) -> Result<(), String> {
     let mut guard = state.0.lock().map_err(|_| "state poisoned")?;
-    if let Some(mut p) = guard.take() {
-        let _ = p.child.kill();
-        let _ = p.child.wait(); // reap
+    let victims: Vec<AcpProcess> = match agent {
+        Some(a) => guard.remove(&a).into_iter().collect(),
+        None => guard.drain().map(|(_, p)| p).collect(),
+    };
+    drop(guard);
+    for p in victims {
+        let AcpProcess {
+            mut child, stdin, ..
+        } = p;
+        // Closing stdin ends the ACP connection, so an adapter started
+        // through a shim (npx → node) exits even though only the shim
+        // process is killed here.
+        drop(stdin);
+        let _ = child.kill();
+        let _ = child.wait(); // reap
     }
     Ok(())
 }
@@ -176,18 +327,10 @@ struct DevinStatus {
     authed: bool,
 }
 
+/// Async so the `--version` probe runs off the main (UI) thread.
 #[tauri::command]
-fn devin_status() -> DevinStatus {
-    let bin = devin_bin();
-    let version = Command::new(&bin)
-        .arg("--version")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .filter(|s| !s.is_empty());
+async fn devin_status() -> DevinStatus {
+    let version = run_first(&[devin_bin()], &["--version"]).filter(|s| !s.is_empty());
     let authed = credential_paths()
         .iter()
         .filter_map(|p| std::fs::read_to_string(p).ok())
@@ -211,6 +354,75 @@ fn devin_login() -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|e| format!("failed to run `devin auth login`: {e}"))
+}
+
+#[derive(Serialize)]
+struct ClaudeStatus {
+    /// `claude --version` output — the Claude Code CLI is installed.
+    cli: Option<String>,
+    /// `claude auth status` reports a signed-in account.
+    authed: bool,
+    /// The ACP adapter is installed globally (else npx fetches it).
+    adapter: bool,
+    /// npx is available as the adapter fallback.
+    npx: bool,
+}
+
+#[tauri::command]
+async fn claude_status() -> ClaudeStatus {
+    let claude = bin_candidates("claude");
+    let cli = run_first(&claude, &["--version"]).filter(|s| !s.is_empty());
+    let from_env = std::env::var("ANTHROPIC_API_KEY").is_ok_and(|k| !k.trim().is_empty());
+    let authed = from_env
+        || (cli.is_some()
+            && run_first(&claude, &["auth", "status"])
+                .and_then(|out| serde_json::from_str::<serde_json::Value>(&out).ok())
+                .and_then(|v| v.get("loggedIn").and_then(|b| b.as_bool()))
+                .unwrap_or(false));
+    let adapter = std::env::var("CLAUDE_ACP_BIN").is_ok()
+        || run_first(&bin_candidates("claude-agent-acp"), &["--version"]).is_some();
+    let npx = adapter || run_first(&bin_candidates("npx"), &["--version"]).is_some();
+    ClaudeStatus {
+        cli,
+        authed,
+        adapter,
+        npx,
+    }
+}
+
+/// Opens a terminal running `claude auth login` — the CLI's sign-in is
+/// interactive (browser + optional code paste), so it needs a console.
+#[tauri::command]
+fn claude_login() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = Command::new("cmd");
+        c.args(["/C", "start", "Claude Code login", "cmd", "/K", "claude auth login"]);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = Command::new("osascript");
+        c.args([
+            "-e",
+            "tell application \"Terminal\" to do script \"claude auth login\"",
+            "-e",
+            "tell application \"Terminal\" to activate",
+        ]);
+        c
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = {
+        let mut c = Command::new("x-terminal-emulator");
+        c.args(["-e", "claude auth login"]);
+        c
+    };
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("could not open a terminal for `claude auth login`: {e}"))
 }
 
 // ---------- workspace filesystem ----------
@@ -261,7 +473,14 @@ fn fs_list_md(root: String) -> Result<Vec<FileEntry>, String> {
         for entry in entries.flatten() {
             let p = entry.path();
             if p.is_dir() {
-                stack.push(p);
+                // Dot folders hold agent config (.claude/skills, .git) —
+                // their markdown is not workspace pages.
+                let hidden = p
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with('.'));
+                if !hidden {
+                    stack.push(p);
+                }
                 continue;
             }
             if !p.extension().is_some_and(|e| e == "md") {
@@ -354,6 +573,8 @@ pub fn run() {
             devin_api_key,
             devin_status,
             devin_login,
+            claude_status,
+            claude_login,
             workspace_dir,
             fs_read,
             fs_write,

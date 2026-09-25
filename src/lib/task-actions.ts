@@ -1,6 +1,7 @@
 import { useWorkspace } from "./store";
 import { askAgent } from "./agent-actions";
 import { docContext } from "./agent-context";
+import { agentForHandle } from "./agents";
 import { toggleTaskAtLine, type TaskItem } from "./tasks";
 
 /** Flips a task's checkbox in its source doc. */
@@ -12,17 +13,22 @@ export function toggleTask(task: TaskItem, done: boolean) {
 }
 
 /**
- * Hands a task to the agent. It works in the workspace and checks the
+ * Hands a task to an agent — the one it is assigned to (`@claude`,
+ * `@devin`), else the default. It works in the workspace and checks the
  * task off in the page when finished — people see it complete in Tasks.
  */
 export function delegateTask(task: TaskItem) {
   const st = useWorkspace.getState();
   const doc = st.docs.find((d) => d.id === task.docId);
   if (!doc) return;
+  const agent =
+    task.assignees.map(agentForHandle).find((a) => a !== null) ?? undefined;
   askAgent({
-    prompt: `Please take care of this task: "${task.text}".\n\nWhen it is done, mark it complete by changing its "- [ ]" to "- [x]" in the page, and add a short note under the task (indented bullet) describing what you did or where the result is.`,
+    // Same recipe as in the workspace skill (cotenk-skill.md).
+    prompt: `Please take care of this task: "${task.text}".\n\nWhen it is done, mark it complete by changing its "- [ ]" to "- [x]" in the page, and add one note line directly below it ("  - Done: …") saying what you did or where the result is. If you can't finish, leave it unticked and add "  - Blocked: <reason>" instead.`,
     context: docContext(doc, st.folders),
     title: task.text,
+    agent,
     stay: true,
   });
 }

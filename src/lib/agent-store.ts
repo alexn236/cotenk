@@ -1,8 +1,9 @@
 import { create } from "zustand";
 import { getSupabase } from "./supabase";
-import { devinAcp, type AgentEvent } from "./agent/acp-client";
+import { acpClient, type AgentEvent } from "./agent/acp-client";
 import type { ModelOption } from "./agent-models";
 import { WORKSPACE_PREAMBLE } from "./agent-context";
+import { AGENT_KINDS, isAgentKind, type AgentKind } from "./agents";
 
 export type AgentRole = "user" | "agent" | "tool";
 
@@ -10,6 +11,8 @@ export type AgentMsg = {
   id: string;
   role: AgentRole;
   text: string;
+  /** Tool rows: pending | in_progress | completed | failed. */
+  status?: string;
   /** Live-updating row while a turn runs. */
   streaming?: boolean;
 };
@@ -17,8 +20,10 @@ export type AgentMsg = {
 export type AgentChat = {
   id: string;
   projectId: string | null;
+  /** Which local agent this chat talks to. Fixed after the first turn. */
+  agent: AgentKind;
   title: string;
-  /** Model id, "" = account default. */
+  /** Model id, "" = the agent's account default. */
   model: string;
   pinned: boolean;
   messages: AgentMsg[];
@@ -40,24 +45,33 @@ export type AgentStatus =
 
 export type { ModelOption };
 
+type PerAgent<T> = Record<AgentKind, T>;
+
 type AgentState = {
   status: AgentStatus;
   chats: AgentChat[];
   projects: AgentProject[];
   activeChatId: string | null;
-  models: ModelOption[];
-  /** Account default model value reported by ACP ("" → this). */
-  currentModel: string | null;
-  /** Model for the next chat when none is active. */
-  defaultModel: string;
+  /** Chat whose turn is running (one turn at a time). */
+  runningChatId: string | null;
+  models: PerAgent<ModelOption[]>;
+  /** Account default model per agent, as reported over ACP. */
+  currentModel: PerAgent<string | null>;
+  /** Agent for new chats and one-off requests (Ask agent, tasks, …). */
+  defaultAgent: AgentKind;
+  /** Model new chats start with, per agent ("" = account default). */
+  defaultModels: PerAgent<string>;
   /** Latest streamed thought — status line while running. */
   thought: string | null;
   /** Context usage of the last turn (tokens used / window size). */
   usage: { used: number; size: number } | null;
   error: string | null;
+  /** Agent the error came from, so other chats don't show it. */
+  errorAgent: AgentKind | null;
   hydrated: boolean;
 
-  refresh: () => Promise<void>;
+  /** Boots an agent (default: the active chat's) and loads its models. */
+  refresh: (agent?: AgentKind) => Promise<void>;
   /**
    * Sends a turn. `context` is prepended to what the agent receives but
    * not shown in the transcript (page paths, task details, …).
@@ -65,14 +79,17 @@ type AgentState = {
   send: (text: string, opts?: { context?: string }) => Promise<void>;
   stop: () => void;
 
-  newChat: (projectId?: string | null) => void;
+  newChat: (projectId?: string | null, agent?: AgentKind) => void;
   selectChat: (id: string) => void;
   closeChat: () => void;
   renameChat: (id: string, title: string) => void;
   deleteChat: (id: string) => void;
   togglePinChat: (id: string) => void;
   setChatModel: (id: string, model: string) => void;
-  setDefaultModel: (model: string) => void;
+  /** Only before the first message — a session belongs to one agent. */
+  setChatAgent: (id: string, agent: AgentKind) => void;
+  setDefaultAgent: (agent: AgentKind) => void;
+  setDefaultModel: (agent: AgentKind, model: string) => void;
   assignChat: (id: string, projectId: string | null) => void;
 
   createProject: (name: string) => void;
@@ -87,7 +104,36 @@ let idCounter = 0;
 const uid = () =>
   `a-${Date.now().toString(36)}-${(idCounter++).toString(36)}`;
 
-let activeChatKey: string | null = null;
+let running: { chatId: string; agent: AgentKind } | null = null;
+
+/* ---------- local preferences ---------- */
+
+const AGENT_KEY = "cotenk-default-agent";
+// Devin keeps the original key so existing choices survive.
+const modelKey = (a: AgentKind) =>
+  a === "devin" ? "cotenk-default-model" : `cotenk-default-model-${a}`;
+
+function readPref(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writePref(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* private mode */
+  }
+}
+
+/** Someone picked an agent on this device (vs. the built-in default). */
+export const hasAgentPreference = () => isAgentKind(readPref(AGENT_KEY));
+
+const perAgent = <T>(fn: (a: AgentKind) => T): PerAgent<T> =>
+  Object.fromEntries(AGENT_KINDS.map((a) => [a, fn(a)])) as PerAgent<T>;
 
 /* ---------- supabase persistence ---------- */
 
@@ -95,10 +141,13 @@ let persistUserId: string | null = null;
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 let persistBusy = false;
 let persistDirty = false;
+/** Cleared when the `agent` column migration hasn't been applied yet. */
+let hasAgentColumn = true;
 
 type ChatRow = {
   id: string;
   project_id: string | null;
+  agent?: string | null;
   title: string;
   model: string;
   pinned: boolean;
@@ -110,6 +159,8 @@ type ChatRow = {
 const toChat = (r: ChatRow): AgentChat => ({
   id: r.id,
   projectId: r.project_id,
+  // Chats from before Claude Code support were all Devin chats.
+  agent: isAgentKind(r.agent) ? r.agent : "devin",
   title: r.title,
   model: r.model ?? "",
   pinned: r.pinned,
@@ -149,23 +200,31 @@ async function flushAgentData() {
     }
 
     if (chats.length > 0) {
-      await sb.from("agent_chats").upsert(
-        chats.map((c) => ({
-          id: c.id,
-          user_id: persistUserId,
-          project_id: c.projectId,
-          title: c.title,
-          model: c.model,
-          pinned: c.pinned,
-          messages: c.messages.map((m) => ({
-            id: m.id,
-            role: m.role,
-            text: m.text,
-          })),
-          acp_session_id: c.acpSessionId,
-          updated_at: c.updatedAt,
+      const rows = chats.map((c) => ({
+        id: c.id,
+        user_id: persistUserId,
+        project_id: c.projectId,
+        ...(hasAgentColumn ? { agent: c.agent } : {}),
+        title: c.title,
+        model: c.model,
+        pinned: c.pinned,
+        messages: c.messages.map((m) => ({
+          id: m.id,
+          role: m.role,
+          text: m.text,
+          ...(m.status ? { status: m.status } : {}),
         })),
-      );
+        acp_session_id: c.acpSessionId,
+        updated_at: c.updatedAt,
+      }));
+      const { error } = await sb.from("agent_chats").upsert(rows);
+      // Migration 20260925 not applied yet — keep saving without it.
+      if (error && hasAgentColumn && /agent/.test(error.message)) {
+        hasAgentColumn = false;
+        await sb
+          .from("agent_chats")
+          .upsert(rows.map(({ agent: _agent, ...rest }) => rest));
+      }
     }
     const { data: rc } = await sb.from("agent_chats").select("id");
     const keepC = new Set(chats.map((c) => c.id));
@@ -198,15 +257,16 @@ export function initAgentSync(userId: string): () => void {
     const sb = getSupabase();
     const [p, c] = await Promise.all([
       sb.from("agent_projects").select("id, name").order("created_at"),
+      // `*` so the pull works with and without the `agent` column.
       sb
         .from("agent_chats")
-        .select(
-          "id, project_id, title, model, pinned, messages, acp_session_id, updated_at",
-        )
+        .select("*")
         .order("updated_at", { ascending: false }),
     ]);
     if (disposed) return;
     if (!p.error && !c.error) {
+      const rows = (c.data ?? []) as unknown as ChatRow[];
+      hasAgentColumn = rows.length === 0 || "agent" in rows[0];
       // Pause persistence so hydrating doesn't echo rows back.
       persistUserId = null;
       useAgent.setState({
@@ -214,8 +274,8 @@ export function initAgentSync(userId: string): () => void {
           id: r.id as string,
           name: r.name as string,
         })),
-        chats: ((c.data ?? []) as unknown as ChatRow[]).map(toChat),
-        activeChatId: (c.data?.[0]?.id as string | undefined) ?? null,
+        chats: rows.map(toChat),
+        activeChatId: rows[0]?.id ?? null,
         hydrated: true,
       });
       persistUserId = userId;
@@ -242,43 +302,58 @@ export function initAgentSync(userId: string): () => void {
 
 /* ---------- store ---------- */
 
+const storedAgent = readPref(AGENT_KEY);
+
 export const useAgent = create<AgentState>()((set, get) => ({
   status: "idle",
   chats: [],
   projects: [],
   activeChatId: null,
-  models: [],
-  currentModel: null,
-  defaultModel:
-    typeof window === "undefined"
-      ? ""
-      : (localStorage.getItem("cotenk-default-model") ?? ""),
+  runningChatId: null,
+  models: perAgent(() => []),
+  currentModel: perAgent(() => null),
+  defaultAgent: isAgentKind(storedAgent) ? storedAgent : "devin",
+  defaultModels: perAgent((a) => readPref(modelKey(a)) ?? ""),
   thought: null,
   usage: null,
   error: null,
+  errorAgent: null,
   hydrated: false,
 
-  refresh: async () => {
+  refresh: async (agent) => {
+    const st = get();
+    const kind =
+      agent ??
+      st.chats.find((c) => c.id === st.activeChatId)?.agent ??
+      st.defaultAgent;
     try {
-      const d = await devinAcp.bootstrap();
+      const d = await acpClient(kind).bootstrap();
       set((s) => ({
-        models: d.models.length ? d.models : s.models,
-        currentModel: d.currentModel ?? s.currentModel,
-        error: !d.ok ? (d.lastError ?? s.error) : s.error,
+        models: d.models.length
+          ? { ...s.models, [kind]: d.models }
+          : s.models,
+        currentModel: d.currentModel
+          ? { ...s.currentModel, [kind]: d.currentModel }
+          : s.currentModel,
+        ...(!d.ok ? { error: d.lastError ?? s.error, errorAgent: kind } : {}),
+        // A healthy boot clears this agent's stale error.
+        ...(d.ok && s.errorAgent === kind && s.status !== "running"
+          ? { error: null, errorAgent: null }
+          : {}),
         status:
           s.status === "running"
             ? s.status
-            : d.busy
-              ? "running"
-              : d.ok
-                ? "ready"
-                : s.status === "idle"
-                  ? "idle"
-                  : s.status,
+            : d.ok
+              ? "ready"
+              : s.status === "idle"
+                ? "idle"
+                : s.status,
         chats:
           Object.keys(d.sessions).length > 0
             ? s.chats.map((c) =>
-                d.sessions[c.id] && d.sessions[c.id] !== c.acpSessionId
+                c.agent === kind &&
+                d.sessions[c.id] &&
+                d.sessions[c.id] !== c.acpSessionId
                   ? { ...c, acpSessionId: d.sessions[c.id] }
                   : c,
               )
@@ -300,13 +375,15 @@ export const useAgent = create<AgentState>()((set, get) => ({
       chat = get().chats.find((c) => c.id === get().activeChatId)!;
     }
     const chatId = chat.id;
+    const agent = chat.agent;
     const firstTurn = chat.messages.length === 0;
-    const agentMsgId = nextMsgId();
     const now = Date.now();
 
     set((s) => ({
       status: "running",
+      runningChatId: chatId,
       error: null,
+      errorAgent: null,
       thought: null,
       usage: null,
       chats: s.chats.map((c) =>
@@ -321,12 +398,6 @@ export const useAgent = create<AgentState>()((set, get) => ({
               messages: [
                 ...c.messages,
                 { id: nextMsgId(), role: "user", text: prompt },
-                {
-                  id: agentMsgId,
-                  role: "agent",
-                  text: "",
-                  streaming: true,
-                },
               ],
             }
           : c,
@@ -337,18 +408,20 @@ export const useAgent = create<AgentState>()((set, get) => ({
       set((s) => ({
         chats: s.chats.map((c) => (c.id === chatId ? fn(c) : c)),
       }));
-    const patchMsg = (fn: (m: AgentMsg) => AgentMsg) =>
+    const patchMsg = (id: string, fn: (m: AgentMsg) => AgentMsg) =>
       patchChat((c) => ({
         ...c,
-        messages: c.messages.map((m) => (m.id === agentMsgId ? fn(m) : m)),
+        messages: c.messages.map((m) => (m.id === id ? fn(m) : m)),
       }));
-    const pushMsg = (role: AgentRole, t: string) =>
-      patchChat((c) => ({
-        ...c,
-        messages: [...c.messages, { id: nextMsgId(), role, text: t }],
-      }));
+    const pushMsg = (m: AgentMsg) =>
+      patchChat((c) => ({ ...c, messages: [...c.messages, m] }));
 
-    activeChatKey = chatId;
+    // Text after a tool call starts a new bubble, so the transcript reads
+    // in the order things happened. Tool updates edit their own row.
+    let textMsgId: string | null = null;
+    const toolRows = new Map<string, { msgId: string; title: string }>();
+
+    running = { chatId, agent };
     try {
       let streamErr: string | null = null;
       // The first turn of every chat carries the workspace conventions,
@@ -360,20 +433,44 @@ export const useAgent = create<AgentState>()((set, get) => ({
       ]
         .filter(Boolean)
         .join("\n\n");
-      await devinAcp.prompt(
+      await acpClient(agent).prompt(
         chatId,
         wire,
         chat.model || undefined,
         (ev: AgentEvent) => {
           if (ev.type === "text") {
-            patchMsg((m) => ({ ...m, text: m.text + ev.text }));
+            if (textMsgId) {
+              const id = textMsgId;
+              patchMsg(id, (m) => ({ ...m, text: m.text + ev.text }));
+            } else {
+              textMsgId = nextMsgId();
+              pushMsg({
+                id: textMsgId,
+                role: "agent",
+                text: ev.text,
+                streaming: true,
+              });
+            }
+            set({ thought: null });
           } else if (ev.type === "thought") {
             set((s) => ({ thought: (s.thought ?? "") + ev.text }));
           } else if (ev.type === "tool") {
-            pushMsg(
-              "tool",
-              `${ev.title}${ev.status ? ` · ${ev.status}` : ""}`,
-            );
+            const known = ev.id ? toolRows.get(ev.id) : undefined;
+            if (known) {
+              if (ev.title) known.title = ev.title;
+              patchMsg(known.msgId, (m) => ({
+                ...m,
+                text: known.title,
+                status: ev.status,
+              }));
+            } else {
+              const msgId = nextMsgId();
+              const title = ev.title ?? "Tool call";
+              if (ev.id) toolRows.set(ev.id, { msgId, title });
+              pushMsg({ id: msgId, role: "tool", text: title, status: ev.status });
+            }
+            textMsgId = null;
+            set({ thought: null });
           } else if (ev.type === "usage") {
             set({ usage: { used: ev.used, size: ev.size } });
           } else if (ev.type === "error") {
@@ -382,50 +479,57 @@ export const useAgent = create<AgentState>()((set, get) => ({
         },
       );
       if (streamErr) throw new Error(streamErr);
-      patchMsg((m) => ({ ...m, streaming: false }));
-      patchChat((c) => ({ ...c, updatedAt: Date.now() }));
       set({ status: "ready", thought: null });
     } catch (e) {
-      patchMsg((m) => ({
-        ...m,
-        streaming: false,
-        text: m.text || "_(failed)_",
-      }));
       set({
         status: "error",
         thought: null,
         error: e instanceof Error ? e.message : String(e),
+        errorAgent: agent,
       });
     } finally {
-      activeChatKey = null;
+      running = null;
+      patchChat((c) => ({
+        ...c,
+        updatedAt: Date.now(),
+        messages: c.messages.map((m) =>
+          m.streaming ? { ...m, streaming: false } : m,
+        ),
+      }));
+      set({ runningChatId: null });
     }
-    void get().refresh();
+    void get().refresh(agent);
   },
 
   stop: () => {
-    if (activeChatKey) devinAcp.cancel(activeChatKey);
+    if (running) acpClient(running.agent).cancel(running.chatId);
   },
 
-  newChat: (projectId = null) => {
+  newChat: (projectId = null, agent) => {
     const id = uid();
-    set((s) => ({
-      chats: [
-        {
-          id,
-          projectId,
-          title: "New chat",
-          model: s.defaultModel,
-          pinned: false,
-          messages: [],
-          acpSessionId: null,
-          updatedAt: Date.now(),
-        },
-        ...s.chats,
-      ],
-      activeChatId: id,
-      thought: null,
-      error: null,
-    }));
+    set((s) => {
+      const kind = agent ?? s.defaultAgent;
+      return {
+        chats: [
+          {
+            id,
+            projectId,
+            agent: kind,
+            title: "New chat",
+            model: s.defaultModels[kind],
+            pinned: false,
+            messages: [],
+            acpSessionId: null,
+            updatedAt: Date.now(),
+          },
+          ...s.chats,
+        ],
+        activeChatId: id,
+        thought: null,
+        error: null,
+        errorAgent: null,
+      };
+    });
   },
 
   selectChat: (id) => set({ activeChatId: id }),
@@ -462,13 +566,25 @@ export const useAgent = create<AgentState>()((set, get) => ({
       chats: s.chats.map((c) => (c.id === id ? { ...c, model } : c)),
     })),
 
-  setDefaultModel: (model) => {
-    try {
-      localStorage.setItem("cotenk-default-model", model);
-    } catch {
-      /* private mode */
-    }
-    set({ defaultModel: model });
+  setChatAgent: (id, agent) => {
+    get().setDefaultAgent(agent);
+    set((s) => ({
+      chats: s.chats.map((c) =>
+        c.id === id && c.messages.length === 0
+          ? { ...c, agent, model: s.defaultModels[agent] }
+          : c,
+      ),
+    }));
+  },
+
+  setDefaultAgent: (agent) => {
+    writePref(AGENT_KEY, agent);
+    set({ defaultAgent: agent });
+  },
+
+  setDefaultModel: (agent, model) => {
+    writePref(modelKey(agent), model);
+    set((s) => ({ defaultModels: { ...s.defaultModels, [agent]: model } }));
   },
 
   assignChat: (id, projectId) =>

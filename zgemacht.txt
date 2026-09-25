@@ -1,3 +1,277 @@
+CoTenk – Was gemacht wurde (Stand 25.09.2026)
+================================================
+
+Die Runde vom 24.09. steht weiter unten, unverändert.
+
+Kurz:
+- GitHub-Repo angelegt und alles gepusht
+- Claude Code als zweiter Agent in der App
+- Agent-UX überarbeitet
+- SKILL.md, damit Agents wissen, wie sie in CoTenk arbeiten
+- 4 Sync-Bugs behoben
+
+Nicht dazugekommen: keine neuen Workspace-Features. Der Fokus lag auf
+Agents und Stabilität.
+
+
+1. GITHUB-REPO
+--------------
+
+- Privates Repo: https://github.com/alexn236/cotenk
+- Branch "main" (lokal von "master" umbenannt).
+- Erster Commit "Migrate to Vite + Tauri desktop app ..." enthält den
+  Stand vor dieser Runde. Die Änderungen dieser Runde kommen als eigener
+  Commit dazu.
+- Geprüft, dass keine Secrets drin sind. .env.local, dist/,
+  node_modules/ und src-tauri/target/ sind ignoriert.
+- Gelöscht: die Datei "src-tauri/2". Das war versehentliche
+  npm-install-Ausgabe (ein Tippfehler bei einer Umleitung).
+- Hinweis: idee.txt, zgemacht.txt und PRODUKT-NOTIZEN.md sind mit im
+  Repo. Es ist privat, aber falls sie da nicht rein sollen, sag Bescheid.
+
+
+2. CLAUDE CODE IN DER APP (der "Claude Connector")
+---------------------------------------------------
+
+Claude Code läuft jetzt genauso wie Devin: lokal, über ACP, im
+Workspace-Ordner. Es arbeitet direkt auf den Seiten, und du siehst die
+Änderungen live.
+
+So funktioniert es:
+- Das Rust-Backend startet pro Agent einen eigenen Prozess. Bisher war
+  "devin acp" fest eingebaut.
+- Claude Code läuft über den offiziellen ACP-Adapter
+  "@agentclientprotocol/claude-agent-acp" (früher
+  "@zed-industries/claude-code-acp"). Ist er global installiert, startet
+  er schnell. Sonst nimmt die App automatisch
+  "npx -y @agentclientprotocol/claude-agent-acp"; der erste Start dauert
+  dann ca. 10 Sekunden.
+- Anmeldung: Es gilt der normale Claude-Login auf dem Rechner (Abo oder
+  API-Key), ohne extra Key in der App. "Connect" öffnet ein Terminal
+  mit "claude auth login". Der Status wird über "claude auth status"
+  geprüft.
+- Modelle kommen direkt von Claude Code: Default, Opus 5.5, Fable 5.1,
+  Sonnet 5, Haiku 4.5.
+- Unter Windows gehen beim Start von Agents keine Konsolenfenster mehr
+  auf (gilt auch für Devin).
+
+Setup für dich (einmalig):
+  npm install -g @anthropic-ai/claude-code          (hast du schon)
+  claude auth login                                  (bist du schon)
+  npm install -g @agentclientprotocol/claude-agent-acp   (optional, schnellerer Start)
+
+Umgebungsvariablen: CLAUDE_ACP_BIN ersetzt den Adapter-Befehl, DEVIN_CLI
+wie bisher den Devin-Befehl.
+
+
+3. AGENT-UX
+-----------
+
+Ziel: Man sieht immer, welcher Agent antwortet und ob er bereit ist.
+Wechseln geht mit einem Klick.
+
+- Agent-Auswahl überall, wo man einem Agent schreibt: Chat, "Ask agent"
+  auf Seiten, Build with AI und Befehlspalette. Der Button zeigt
+  "Claude Code · Sonnet 5", das Menü hat oben einen Umschalter
+  Claude Code / Devin CLI mit Statuspunkt (grün = bereit, orange =
+  Anmeldung fehlt, grau = nicht installiert).
+- Ein Chat gehört zu einem Agent. Vor der ersten Nachricht kann man
+  wechseln, danach nicht mehr ("Start a new chat to switch").
+- Leerer Chat: Agent-Umschalter, Status ("Claude Code · 2.1.282 · signed
+  in") und bei Bedarf direkt "Connect Claude Code". Vorher gab es nur
+  einen allgemeinen "Connect Devin CLI"-Button, geraten aus dem
+  Fehlertext.
+- Der Default-Agent wird gemerkt. Solange man keinen gewählt hat, nimmt
+  die App automatisch den, der tatsächlich verbunden ist.
+- "Hand to agent" bei Tasks: Ein Task mit @claude geht an Claude Code,
+  einer mit @devin an Devin, alles andere an den Default.
+- Tool-Aufrufe im Chat: eine Zeile pro Aufruf, die sich live aktualisiert
+  (Spinner → Haken bzw. Warnung bei Fehler). Vorher kam für jedes
+  Status-Update eine neue Zeile dazu; bei Claude waren das 4 Zeilen pro
+  Datei-Schreibvorgang.
+- Antworttext erscheint in der richtigen Reihenfolge. Text nach einem
+  Tool-Aufruf ist eine neue Nachricht. Vorher klebte aller Text oben über
+  den Tools.
+- "Working…" bzw. der aktuelle Gedanke steht unten im Chat, nicht mehr
+  als leere Blase oben.
+- Läuft ein Agent in einem anderen Chat, zeigt der Composer das an
+  ("An agent is working in another chat — open it"). Vorher passierte
+  beim Senden einfach nichts.
+- Chat-Liste: kleines Kürzel "claude" oder "devin" pro Chat, pulsierender
+  Punkt beim laufenden Chat.
+- Die schwebende Aktivitäts-Pill zeigt den Agent-Namen ("Claude Code
+  working") und springt beim Klick in den richtigen Chat, nicht in den
+  zuletzt offenen.
+- Fehler erscheinen nur im Chat des Agents, von dem sie kommen. Bei
+  Anmelde- oder Installationsproblemen gibt es einen Link "Open
+  settings".
+- Settings → Agents: je eine Karte pro Agent mit Version, Login-Status,
+  Connect, "Make default" und konkretem Hinweis, was fehlt (inklusive
+  Installationsbefehl). Claude Code steht unter "Open ecosystem" jetzt
+  als "Available".
+- Welcome-Seite und Get-started-Checkliste erwähnen Claude Code.
+
+
+4. SKILL.md FÜR AGENTS
+----------------------
+
+- Neue Datei src/lib/agent/cotenk-skill.md (ca. 190 Zeilen), von einem
+  Subagent aus dem echten Code abgeleitet und danach von mir geprüft und
+  angepasst.
+- Inhalt: Dateiformat und Frontmatter, Umbenennen und Verschieben (nur
+  über title:/folder:), welche Markdown-Blöcke funktionieren und welche
+  nicht, Tasks (@owner, due:), Ablauf bei "Hand to agent", Embed-Regeln
+  mit Sandbox-Grenzen und Theme-Variablen plus Beispiel-Widget,
+  Arbeitsstil für Produktivität (kleine Änderungen, scanbare Seiten, am
+  Ende 1–3 Sätze Zusammenfassung) und Rezepte (Zusammenfassen, Action
+  Items, Meeting Notes, Weekly Review, Dashboard).
+- Die App kopiert sie vor jedem Agent-Start nach
+  <Workspace>/.claude/skills/cotenk-workspace/SKILL.md. Claude Code lädt
+  sie dort automatisch als Skill. Alle anderen Agents (Devin) werden in
+  der ersten Nachricht jedes Chats darauf hingewiesen.
+- Der Datei-Sync ignoriert jetzt Punkt-Ordner (.claude, .git), damit die
+  SKILL.md nicht als Seite im Workspace auftaucht.
+
+
+5. BEHOBENE FEHLER
+------------------
+
+Gefunden hat sie der Skill-Subagent beim Lesen des Codes:
+
+- Seite bekommt eine neue ID bzw. wird dupliziert: Speicherte ein Agent
+  eine Seite mit Windows-Zeilenenden (CRLF) oder BOM, wurde die
+  Frontmatter nicht erkannt. Die Seite wurde als neue Seite übernommen
+  und die alte gelöscht. Beides wird jetzt beim Einlesen normalisiert.
+- Titel doppelt: Legt ein Agent eine Seite mit "# Titel" an, stand der
+  Titel im Titelfeld UND als erste Überschrift im Text. Die führende
+  Überschrift wird jetzt beim Übernehmen entfernt.
+- Doppelter Ordner: Legte ein Agent eine Seite in "q3-plans/" an (so
+  heißt der Ordner "Q3 Plans" auf der Platte), entstand ein zweiter
+  Ordner "q3-plans". Ordner werden jetzt auch über den Dateinamen
+  erkannt.
+- Späte "Prozess beendet"-Meldung: Ein Neustart des Agents (z. B. nach
+  Ordnerwechsel) konnte durch die späte Meldung des alten Prozesses die
+  neue Sitzung abbrechen. Das Backend unterscheidet die Prozesse jetzt.
+
+
+6. DATENBANK
+------------
+
+- NOCH ZU TUN: supabase/migrations/20260925_agent_kind.sql ausführen
+  (eine Spalte "agent" in agent_chats). Ohne sie läuft alles, aber nach
+  einem Neuladen gelten alle Chats wieder als Devin-Chats.
+- Weiterhin offen laut letzter Runde:
+  supabase/migrations/20260923_agent_chats.sql. Das konnte ich nicht
+  prüfen, weil der Supabase-MCP-Server in dieser Sitzung nicht angemeldet
+  war (in Claude Code mit /mcp anmelden).
+
+
+7. GEPRÜFT / NICHT GEPRÜFT
+--------------------------
+
+Geprüft:
+- cargo check, TypeScript und ESLint ohne Fehler, Produktions-Build läuft.
+- Echter End-to-End-Test gegen Claude Code über ACP (so wie die App es
+  macht): initialize ohne Extra-Login, Session, Modellliste,
+  Modellwechsel auf Haiku, automatische Freigabe, Claude hat eine Datei
+  im Workspace angelegt.
+- Rust-seitig getestet: claude.cmd, claude auth status und der Adapter
+  starten unter Windows korrekt und antworten auf initialize. Der Test
+  wurde danach wieder entfernt.
+
+Nicht geprüft:
+- Die Oberfläche in der laufenden Desktop-App (npm run tauri:dev) habe
+  ich nicht durchgeklickt, weil dafür dein Login nötig ist. Bitte einmal
+  testen: Settings → Agents, neuen Chat mit Claude Code, "Ask agent" auf
+  einer Seite, "Hand to agent" bei einem @claude-Task.
+- Devin nach dem Umbau. Die Logik ist unverändert, aber der
+  Prozess-Start läuft jetzt über denselben neuen Weg.
+- macOS und Linux (Terminal für den Claude-Login, PATH).
+
+
+8. IDEEN – BEWUSST NICHT UMGESETZT (Entscheidung bei dir)
+---------------------------------------------------------
+
+Wichtig / Sicherheit:
+- Freigaben statt Auto-Approve. Claude Code und Devin bekommen alle
+  Berechtigungen automatisch. Bei Claude Code heißt das auch
+  Shell-Befehle, und die sind NICHT auf den Workspace-Ordner beschränkt.
+  Das ist bequem, aber ein echtes Risiko. Vorschläge:
+  a) Claude im Modus "acceptEdits" starten (Dateien ok, Shell fragt
+     nach), oder
+  b) ein kleiner Freigabe-Dialog im Chat ("Claude möchte `npm install`
+     ausführen – Erlauben / Einmal / Ablehnen").
+  Ich würde b) bald machen.
+
+Agents:
+- Mehrere Agents gleichzeitig. Heute läuft app-weit immer nur ein Turn.
+  Technisch geht mehr (ein Prozess pro Agent), aber der Store hat einen
+  globalen Status. Nützlich, aber mehr UI (mehrere Pills usw.).
+- Claude-Modi in der UI (Plan, Default, Accept edits) und
+  "Reasoning effort". Beides meldet der Adapter schon, es wäre nur eine
+  weitere Auswahl. Weggelassen gegen Feature-Überladung.
+- Gemini CLI als dritter Agent. Seit dem Umbau ist das fast nur ein
+  Eintrag in agents.ts und in Rust ("gemini --experimental-acp").
+- Button "Adapter installieren" in Settings, der
+  "npm i -g @agentclientprotocol/claude-agent-acp" ausführt. Heute steht
+  nur der Hinweis da.
+- Andere Richtung "Claude Connector": ein MCP-Server von CoTenk, damit
+  Claude Code im normalen Terminal (oder claude.ai) auf Seiten und Tasks
+  zugreifen kann. Solange der Workspace ein normaler Ordner ist, geht das
+  auch ohne: Claude Code im Ordner ~/Documents/CoTenk starten, die SKILL.md
+  liegt dort. Ein MCP-Server lohnt sich erst für Web-Nutzer ohne lokalen
+  Ordner.
+- Die SKILL.md im Workspace wird bei jedem Start mit der App-Version
+  überschrieben. Eigene Änderungen daran gehen verloren. Alternative: nur
+  schreiben, wenn die Datei fehlt oder unverändert ist.
+
+Editor / Sync (aus dem Skill-Bericht, nicht behoben):
+- Verschachtelte Listen werden flach dargestellt und beim Bearbeiten flach
+  gespeichert. Die "Done:"-Notiz unter delegierten Tasks ist dadurch
+  nicht eingerückt.
+- Task-Chips (@owner, due:) verschwinden, wenn der Task-Text einen
+  Backtick enthält.
+- Embeds verlieren ihren Zustand beim Neuladen (bekannt, siehe
+  PRODUKT-NOTIZEN).
+
+Technik:
+- Wird ein über npx gestarteter Adapter gestoppt, beendet Windows nur
+  die npx-Hülle. Der Node-Prozess endet, weil stdin geschlossen wird;
+  das sollte reichen, ist aber nicht explizit getestet. Sicherer wäre ein
+  Job-Object bzw. eine Prozessgruppe.
+- Unter macOS finden aus dem Finder gestartete Apps oft kein
+  npm/npx/claude, weil der PATH der Shell fehlt. Falls macOS wichtig wird:
+  PATH beim Start aus der Login-Shell laden (z. B. das Crate
+  "fix-path-env").
+- .gitattributes mit "eol=lf" für .md-Dateien. Git wandelt unter Windows
+  sonst in CRLF um. Der Sync verträgt das jetzt, sauberer wäre es trotzdem.
+
+
+9. NEUE / GEÄNDERTE DATEIEN
+---------------------------
+
+Neu:
+  src/lib/agents.ts                  Agent-Register (Claude Code, Devin)
+  src/lib/agent-setup.ts             Installiert? Angemeldet? Connect.
+  src/lib/agent/workspace-skill.ts   kopiert die SKILL.md in den Workspace
+  src/lib/agent/cotenk-skill.md      die SKILL.md
+  src/components/agents/agent-switch.tsx
+  supabase/migrations/20260925_agent_kind.sql
+
+Stark geändert:
+  src-tauri/src/lib.rs (mehrere Agents, claude_status/claude_login,
+  keine Konsolenfenster, Punkt-Ordner), acp-client.ts, agent-store.ts,
+  agents-view.tsx, model-select.tsx, settings-view.tsx
+
+Kleiner:
+  model-picker.tsx, agents-nav.tsx, agent-activity.tsx, agent-actions.ts,
+  task-actions.ts, agent-context.ts, file-sync.ts, mock-docs.ts,
+  home-view.tsx, README.md
+
+
+================================================================
+================================================================
+
 CoTenk – Was gemacht wurde (Stand 24.09.2026)
 ================================================
 

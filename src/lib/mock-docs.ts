@@ -38,7 +38,7 @@ Blocks of self-contained HTML run in a sandbox, right inside the page. Agents ca
 
 ## Agents work on the same files
 
-Connect Devin CLI in Settings → Agents. It runs locally over ACP, inside your workspace folder, and edits pages directly — you watch the changes land here and can undo them with Ctrl Z.
+Connect Claude Code or Devin CLI in Settings → Agents. Both run locally over ACP, inside your workspace folder, and edit pages directly — you watch the changes land here and can undo them with Ctrl Z.
 
 > A workspace is not an agent. It is the place where agents and people meet.
 `,

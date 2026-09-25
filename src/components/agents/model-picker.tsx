@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { Check, Image as ImageIcon, MagnifyingGlass } from "@phosphor-icons/react";
 import {
@@ -61,6 +61,8 @@ export function ModelPicker({
   onPick,
   onClose,
   placement = "up",
+  header,
+  note,
 }: {
   /** Open above (composer at the bottom) or below the anchor. */
   placement?: "up" | "down";
@@ -69,6 +71,10 @@ export function ModelPicker({
   active: string;
   onPick: (value: string) => void;
   onClose: () => void;
+  /** Row above both panes (e.g. the agent switch). */
+  header?: ReactNode;
+  /** Small print under the model settings (billing hint). */
+  note?: string;
 }) {
   const reduceMotion = useReducedMotion();
   const families = useMemo(() => groupModels(models), [models]);
@@ -181,12 +187,16 @@ export function ModelPicker({
           ? { duration: 0.1 }
           : { type: "spring", duration: 0.22, bounce: 0 }
       }
-      className={`absolute right-0 z-40 flex h-[360px] w-[480px] max-w-[calc(100vw-24px)] overflow-hidden ${
+      className={`absolute right-0 z-40 flex ${header ? "h-[400px]" : "h-[360px]"} w-[480px] max-w-[calc(100vw-24px)] flex-col overflow-hidden ${
         placement === "up"
           ? "bottom-full mb-1.5 origin-bottom"
           : "top-full mt-1.5 origin-top"
       } rounded-[12px] border border-line bg-panel shadow-[0_16px_48px_var(--color-shadow)]`}
     >
+      {header && (
+        <div className="shrink-0 border-b border-line-soft p-2">{header}</div>
+      )}
+      <div className="flex min-h-0 flex-1">
       {/* left: search + family list */}
       <div className="flex w-[240px] shrink-0 flex-col border-r border-line-soft">
         <div className="flex items-center gap-1.5 border-b border-line-soft px-2.5 py-2">
@@ -337,11 +347,12 @@ export function ModelPicker({
               />
             )}
 
-            <p className="mt-3 font-mono text-[9.5px] text-ink-3">
-              same pricing as devin cli
-            </p>
+            {note && (
+              <p className="mt-3 font-mono text-[9.5px] text-ink-3">{note}</p>
+            )}
           </>
         )}
+      </div>
       </div>
     </motion.div>
   );

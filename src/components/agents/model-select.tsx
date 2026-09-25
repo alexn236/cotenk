@@ -1,47 +1,97 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence } from "motion/react";
-import { CaretDown, Cpu } from "@phosphor-icons/react";
+import { CaretDown } from "@phosphor-icons/react";
 import { useAgent } from "@/lib/agent-store";
+import { useAgentSetup } from "@/lib/agent-setup";
+import { AGENTS, type AgentKind } from "@/lib/agents";
 import { isDesktop } from "@/lib/workspace";
 import { ModelPicker } from "./model-picker";
+import { AgentSwitch, SetupDot } from "./agent-switch";
+
+const NOTE: Record<AgentKind, string> = {
+  devin: "same pricing as devin cli",
+  claude: "billed through your claude plan or api key",
+};
 
 /**
- * Compact model button + picker for every place that starts an agent
- * turn outside the chat (Ask agent, Build with AI, command palette).
- * It edits the default model, which every new chat starts with — so the
- * choice applies to the next request and is remembered.
+ * Agent + model button with its picker. Used everywhere a turn starts:
+ * the chat composer (edits that chat) and one-off requests like Ask
+ * agent, Build with AI and the command palette (edits the defaults, so
+ * the choice applies to the next request and is remembered).
  *
  * The picker renders in a portal anchored to the button, so popovers and
  * dialogs with overflow clipping don't cut it off.
  */
 export function ModelSelect({
+  chatId,
   placement = "down",
+  size = "sm",
 }: {
+  /** Edit this chat instead of the defaults. */
+  chatId?: string;
   placement?: "up" | "down";
+  size?: "sm" | "md";
 }) {
-  const models = useAgent((s) => s.models);
-  const defaultModel = useAgent((s) => s.defaultModel);
+  const chat = useAgent((s) =>
+    chatId ? (s.chats.find((c) => c.id === chatId) ?? null) : null,
+  );
+  const defaultAgent = useAgent((s) => s.defaultAgent);
+  const defaultModels = useAgent((s) => s.defaultModels);
+  const modelsByAgent = useAgent((s) => s.models);
   const currentModel = useAgent((s) => s.currentModel);
+  const setDefaultAgent = useAgent((s) => s.setDefaultAgent);
   const setDefaultModel = useAgent((s) => s.setDefaultModel);
+  const setChatAgent = useAgent((s) => s.setChatAgent);
+  const setChatModel = useAgent((s) => s.setChatModel);
   const refresh = useAgent((s) => s.refresh);
+  const setup = useAgentSetup((s) => s.setup);
   const btnRef = useRef<HTMLButtonElement>(null);
   const [rect, setRect] = useState<DOMRect | null>(null);
 
-  // The model list comes from the agent process; load it lazily.
-  useEffect(() => {
-    if (models.length === 0 && isDesktop()) void refresh();
-  }, [models.length, refresh]);
+  const agent = chat?.agent ?? defaultAgent;
+  const model = chat ? chat.model : defaultModels[agent];
+  // A started chat keeps its agent — its session lives in that process.
+  const locked = !!chat && chat.messages.length > 0;
+  const models = modelsByAgent[agent];
+  const open = rect !== null;
 
-  const effective = defaultModel || currentModel || "";
-  const name = effective
+  // The model list comes from the agent process; load it when needed.
+  useEffect(() => {
+    if (open && models.length === 0 && isDesktop()) void refresh(agent);
+  }, [open, agent, models.length, refresh]);
+
+  const effective = model || currentModel[agent] || "";
+  const modelName = effective
     ? (models.find((m) => m.value === effective)?.name ?? effective)
-    : "Model";
+    : "Default model";
+
+  const pickAgent = (k: AgentKind) => {
+    if (chat) setChatAgent(chat.id, k);
+    else setDefaultAgent(k);
+  };
+  const pickModel = (v: string) => {
+    if (chat) setChatModel(chat.id, v);
+    else setDefaultModel(agent, v);
+  };
 
   const toggle = () =>
     setRect((r) =>
       r ? null : (btnRef.current?.getBoundingClientRect() ?? null),
     );
+
+  const header = (
+    <div className="flex flex-col gap-1.5">
+      <AgentSwitch value={agent} onChange={pickAgent} disabled={locked} />
+      {locked && (
+        <p className="px-1 text-[10.5px] text-ink-3">
+          This chat stays with {AGENTS[agent].name}. Start a new chat to
+          switch agents.
+        </p>
+      )}
+    </div>
+  );
+  const s = setup[agent];
 
   return (
     <>
@@ -50,13 +100,18 @@ export function ModelSelect({
         type="button"
         onMouseDown={(e) => e.preventDefault()}
         onClick={toggle}
-        title="Model for the next request"
+        title="Agent and model"
         aria-haspopup="dialog"
-        aria-expanded={rect !== null}
-        className="flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] border border-line bg-panel-2 px-2 text-[11.5px] text-ink-2 transition-colors duration-150 hover:bg-hover"
+        aria-expanded={open}
+        className={`flex shrink-0 items-center gap-1.5 rounded-[7px] border border-line bg-panel-2 px-2 text-ink-2 transition-colors duration-150 hover:bg-hover ${
+          size === "md" ? "h-8 text-[11.5px]" : "h-7 text-[11.5px]"
+        }`}
       >
-        <Cpu size={12} className="text-ink-3" />
-        <span className="max-w-[110px] truncate">{name}</span>
+        <SetupDot kind={agent} />
+        <span className="max-w-[190px] truncate">
+          <span className="text-ink">{AGENTS[agent].name}</span>
+          <span className="text-ink-3"> · {modelName}</span>
+        </span>
         <CaretDown size={9} className="text-ink-3" />
       </button>
       {typeof document !== "undefined" &&
@@ -87,20 +142,27 @@ export function ModelSelect({
                   >
                     {models.length === 0 ? (
                       <div
-                        className={`absolute right-0 w-[260px] rounded-[10px] border border-line bg-panel p-3 text-[12px] leading-relaxed text-ink-3 shadow-[0_16px_48px_var(--color-shadow)] ${
+                        className={`absolute right-0 flex w-[300px] flex-col gap-2 rounded-[10px] border border-line bg-panel p-2 shadow-[0_16px_48px_var(--color-shadow)] ${
                           placement === "up" ? "bottom-full mb-1.5" : "top-full mt-1.5"
                         }`}
                       >
-                        {isDesktop()
-                          ? "Loading models from the agent… Connect Devin CLI in Settings → Agents if this stays empty."
-                          : "Models are available in the desktop app, where the agent runs."}
+                        {header}
+                        <p className="px-1 pb-1 text-[12px] leading-relaxed text-ink-3">
+                          {!isDesktop()
+                            ? "Agents run in the desktop app, on your machine."
+                            : s?.hint
+                              ? s.hint
+                              : `Loading models from ${AGENTS[agent].name}… The default model works right away.`}
+                        </p>
                       </div>
                     ) : (
                       <ModelPicker
                         models={models}
-                        active={defaultModel}
+                        active={model}
                         placement={placement}
-                        onPick={setDefaultModel}
+                        header={header}
+                        note={NOTE[agent]}
+                        onPick={pickModel}
                         onClose={() => setRect(null)}
                       />
                     )}

@@ -15,7 +15,8 @@ Conventions:
 - Supported blocks: headings (#, ##, ###), paragraphs, "- " bullets, "1. " lists, "- [ ] " tasks, "> " quotes, fenced code, "---" dividers and GFM tables. Separate blocks with a blank line.
 - Tasks may carry "@name" for an assignee and "due:YYYY-MM-DD" for a due date.
 - Interactive embeds: a block of raw, self-contained HTML (inline <style>/<script>, no external URLs or libraries) starting with a tag like <div> — it renders in a sandboxed iframe. Keep embeds under ~250 lines and avoid blank lines inside them. Keep the background transparent and use the theme variables CoTenk injects: var(--ck-ink), var(--ck-ink-2), var(--ck-ink-3) for text, var(--ck-accent), var(--ck-accent-dim) for highlights, var(--ck-panel), var(--ck-panel-2), var(--ck-line) for surfaces and borders, var(--ck-danger) for errors.
-- Keep edits focused; do not delete content you were not asked to change.`;
+- Keep edits focused; do not delete content you were not asked to change.
+- The full guide (file rules, embeds, task hand-offs, recipes) is in .claude/skills/cotenk-workspace/SKILL.md — read it before creating pages or embeds. Finish each turn with 1–3 sentences on what changed and in which page.`;
 
 /** Short context block that points the agent at one page. */
 export function docContext(doc: Doc, folders: Folder[]): string {

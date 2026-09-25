@@ -12,16 +12,16 @@ import {
 import { useWorkspace } from "@/lib/store";
 import { useAuth } from "@/lib/auth-store";
 import { useAgent } from "@/lib/agent-store";
-import { devinAcp } from "@/lib/agent/acp-client";
+import { useAgentSetup } from "@/lib/agent-setup";
+import { acpClient, killAllAgents } from "@/lib/agent/acp-client";
+import { AGENT_KINDS, AGENTS, type AgentKind } from "@/lib/agents";
 import {
   apiKeyOverride,
   DESKTOP_ONLY_MESSAGE,
-  devinStatus,
   isDesktop,
   resolveWorkspaceDir,
   storeApiKeyOverride,
   storeWorkspaceDir,
-  type DevinStatus,
 } from "@/lib/workspace";
 
 /* ---------- shared primitives ---------- */
@@ -286,98 +286,79 @@ function SmallButton({
   );
 }
 
-function AgentsSection() {
+function AgentCard({ kind }: { kind: AgentKind }) {
   const status = useAgent((s) => s.status);
-  const chats = useAgent((s) => s.chats);
-  const models = useAgent((s) => s.models);
-
-  const [cli, setCli] = useState<DevinStatus | null>(null);
-  const [dir, setDir] = useState<string | null>(null);
+  const runningChatId = useAgent((s) => s.runningChatId);
+  const runningAgent = useAgent(
+    (s) => s.chats.find((c) => c.id === s.runningChatId)?.agent ?? null,
+  );
+  const defaultAgent = useAgent((s) => s.defaultAgent);
+  const setDefaultAgent = useAgent((s) => s.setDefaultAgent);
+  const setup = useAgentSetup((s) => s.setup[kind]);
+  const check = useAgentSetup((s) => s.check);
+  const connect = useAgentSetup((s) => s.connect);
+  const connecting = useAgentSetup((s) => s.connecting);
   const [keyDraft, setKeyDraft] = useState(apiKeyOverride() ?? "");
-  const [connecting, setConnecting] = useState(false);
 
-  const refreshStatus = () => {
-    devinStatus()
-      .then(setCli)
-      .catch(() => setCli(null));
-  };
   useEffect(() => {
-    refreshStatus();
-    resolveWorkspaceDir().then(setDir).catch(() => {});
-  }, []);
+    void check(kind);
+  }, [check, kind]);
 
-  const hasKey = !!apiKeyOverride();
-  const connected = !!cli?.authed || hasKey;
-
-  const connect = async () => {
-    setConnecting(true);
-    try {
-      await invoke("devin_login");
-      // The CLI drives a browser sign-in; poll until the key lands.
-      for (let i = 0; i < 30; i++) {
-        await new Promise((r) => setTimeout(r, 2000));
-        const s = await devinStatus().catch(() => null);
-        if (s?.authed) {
-          setCli(s);
-          await devinAcp.kill(); // re-auth on next turn
-          break;
-        }
-      }
-      refreshStatus();
-    } finally {
-      setConnecting(false);
-    }
-  };
-
-  const pickDir = async () => {
-    const chosen = await openDialog({
-      directory: true,
-      defaultPath: dir ?? undefined,
-      title: "Choose the CoTenk workspace folder",
-    });
-    if (typeof chosen === "string" && chosen) {
-      storeWorkspaceDir(chosen);
-      setDir(chosen);
-      await devinAcp.kill(); // next turn spawns in the new folder
-    }
-  };
+  const info = AGENTS[kind];
+  const ready = !!setup?.installed && !!setup.authed;
+  const isRunning =
+    (status === "running" || status === "starting") &&
+    !!runningChatId &&
+    runningAgent === kind;
 
   return (
-    <section>
-      <SectionTitle
-        title="Agents"
-        sub="Devin CLI runs locally via ACP, inside your workspace folder."
-      />
-      <Card>
-        <Row
-          icon={Lightning}
-          label="Devin CLI"
-          desc={
-            cli === null
-              ? "Checking…"
-              : !cli.binary
-                ? "devin not found in PATH — install Devin CLI first"
-                : `${cli.version ?? "installed"} · ${
-                    connected ? "signed in" : "not signed in"
-                  }`
-          }
-        >
-          {cli?.binary && !connected ? (
-            <SmallButton accent onClick={() => void connect()}>
-              {connecting ? "Waiting for sign-in…" : "Connect"}
+    <Card>
+      <Row
+        icon={Lightning}
+        label={
+          <span className="flex items-center gap-2">
+            {info.name}
+            {defaultAgent === kind && <Badge>Default</Badge>}
+          </span>
+        }
+        desc={setup ? setup.detail : "Checking…"}
+      >
+        <div className="flex items-center gap-2">
+          {setup?.installed && !setup.authed ? (
+            <SmallButton accent onClick={() => void connect(kind)}>
+              {connecting === kind ? "Waiting for sign-in…" : "Connect"}
             </SmallButton>
           ) : (
             <Badge>
-              {status === "running" || status === "starting"
+              {isRunning
                 ? "Running"
-                : status === "error"
-                  ? "Error"
-                  : connected
-                    ? "Connected"
-                    : "Not connected"}
+                : ready
+                  ? "Connected"
+                  : setup
+                    ? "Not installed"
+                    : "…"}
             </Badge>
           )}
-        </Row>
+          {defaultAgent !== kind && (
+            <SmallButton onClick={() => setDefaultAgent(kind)}>
+              Make default
+            </SmallButton>
+          )}
+        </div>
+      </Row>
+      {setup?.hint && (
+        <div className="px-4 py-2.5 text-[12px] leading-relaxed text-ink-3">
+          {setup.hint}{" "}
+          <button
+            type="button"
+            onClick={() => void check(kind)}
+            className="text-accent hover:underline"
+          >
+            Check again
+          </button>
+        </div>
+      )}
+      {kind === "devin" && (
         <Row
           icon={Key}
           label="API key"
@@ -388,21 +369,57 @@ function AgentsSection() {
               type="password"
               value={keyDraft}
               onChange={(e) => setKeyDraft(e.target.value)}
-              placeholder={hasKey ? "key saved" : "paste key"}
+              placeholder={apiKeyOverride() ? "key saved" : "paste key"}
               className="w-44 rounded-[7px] border border-line bg-panel-2 px-2 py-1 font-mono text-[11.5px] text-ink outline-none placeholder:text-ink-3 focus:border-accent"
             />
             <SmallButton
               onClick={() => {
                 storeApiKeyOverride(keyDraft || null);
-                setKeyDraft(keyDraft);
-                void devinAcp.kill();
+                void acpClient("devin").kill();
+                void check("devin");
               }}
             >
               Save
             </SmallButton>
           </div>
         </Row>
-      </Card>
+      )}
+    </Card>
+  );
+}
+
+function AgentsSection() {
+  const chats = useAgent((s) => s.chats);
+  const [dir, setDir] = useState<string | null>(null);
+
+  useEffect(() => {
+    resolveWorkspaceDir().then(setDir).catch(() => {});
+  }, []);
+
+  const pickDir = async () => {
+    const chosen = await openDialog({
+      directory: true,
+      defaultPath: dir ?? undefined,
+      title: "Choose the CoTenk workspace folder",
+    });
+    if (typeof chosen === "string" && chosen) {
+      storeWorkspaceDir(chosen);
+      setDir(chosen);
+      await killAllAgents(); // next turn spawns in the new folder
+    }
+  };
+
+  return (
+    <section>
+      <SectionTitle
+        title="Agents"
+        sub="Agents run locally on your machine via ACP, inside your workspace folder. Each chat talks to one agent; the default is used for Ask agent, tasks and Build with AI."
+      />
+      <div className="flex flex-col gap-3">
+        {AGENT_KINDS.map((k) => (
+          <AgentCard key={k} kind={k} />
+        ))}
+      </div>
 
       <div className="mt-5">
         <Card>
@@ -411,7 +428,7 @@ function AgentsSection() {
             label="Workspace folder"
             desc={
               dir
-                ? `${dir} — the agent can only read/write inside it`
+                ? `${dir} — agents read and write here`
                 : "Resolving…"
             }
           >
@@ -428,14 +445,15 @@ function AgentsSection() {
           </Row>
           <Row label="Chats">
             <span className="font-mono text-[12px] text-ink-2">
-              {chats.length} chats · {models.length} models
+              {chats.length} chats
             </span>
           </Row>
         </Card>
       </div>
-      <p className="mt-3 font-mono text-[11px] text-ink-3">
-        docs sync into this folder as .md files · the agent edits them on
-        disk and changes flow back to supabase · permissions auto-approved
+      <p className="mt-3 font-mono text-[11px] leading-relaxed text-ink-3">
+        docs sync into this folder as .md files · agents edit them on disk
+        and changes flow back to supabase · edits are auto-approved · agents
+        get a workspace guide in .claude/skills/cotenk-workspace
       </p>
 
       <div className="mt-8">
@@ -456,8 +474,8 @@ function AgentsSection() {
 }
 
 const ECOSYSTEM: { name: string; desc: string; state: string }[] = [
+  { name: "Claude Code", desc: "Via the ACP adapter · local", state: "Available" },
   { name: "Devin CLI", desc: "Native ACP · local", state: "Available" },
-  { name: "Claude Code", desc: "Via ACP adapter", state: "Coming soon" },
   { name: "Gemini CLI", desc: "Native ACP", state: "Coming soon" },
   {
     name: "Custom ACP command",
@@ -471,7 +489,7 @@ function AgentsWebNotice() {
     <section>
       <SectionTitle
         title="Agents"
-        sub="Devin CLI runs locally via ACP, inside your workspace folder."
+        sub="Claude Code and Devin CLI run locally via ACP, inside your workspace folder."
       />
       <div className="rounded-[10px] border border-dashed border-line px-4 py-4 text-[12.5px] leading-relaxed text-ink-3">
         {DESKTOP_ONLY_MESSAGE} Your pages and tasks stay in sync between the
