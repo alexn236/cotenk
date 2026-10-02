@@ -1,8 +1,17 @@
+import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { create } from "zustand";
 import { acpClient } from "./agent/acp-client";
 import { hasAgentPreference, useAgent } from "./agent-store";
 import { AGENT_KINDS, type AgentKind } from "./agents";
+import {
+  cotenkAgentReady,
+  providerInfo,
+  useCotenkAgent,
+  type ProviderId,
+} from "./cotenk-agent";
+import { openWelcomePage, useWorkspace } from "./store";
+import { WELCOME_ID } from "./welcome";
 import { apiKeyOverride, devinStatus, isDesktop } from "./workspace";
 
 /**
@@ -29,7 +38,30 @@ type ClaudeStatus = {
   npx: boolean;
 };
 
+type CotenkStatus = { version: string | null; npx: boolean };
+
 async function probe(kind: AgentKind): Promise<AgentSetup> {
+  if (kind === "cotenk") {
+    const s = await invoke<CotenkStatus>("cotenk_status");
+    // A global OpenCode starts fastest; npx fetches it on first use.
+    const installed = !!s.version || s.npx;
+    const authed = cotenkAgentReady();
+    const provider = providerInfo(useCotenkAgent.getState().provider).name;
+    return {
+      installed,
+      authed,
+      detail: !installed
+        ? "Needs Node.js"
+        : `${authed ? `${provider} key saved` : "No API key"}${
+            s.version ? ` · OpenCode ${s.version.replace(/^v/, "")}` : " · OpenCode via npx"
+          }`,
+      hint: !installed
+        ? "Install Node.js, then check again — OpenCode comes with it."
+        : authed
+          ? null
+          : "Paste an API key from Anthropic, OpenAI, OpenRouter or another provider.",
+    };
+  }
   if (kind === "devin") {
     const s = await devinStatus();
     const authed = s.authed || !!apiKeyOverride();
@@ -69,7 +101,7 @@ async function probe(kind: AgentKind): Promise<AgentSetup> {
 export type NodeStatus = { node: string | null; npm: boolean };
 
 /** Agents the setup guide can install (npm packages). */
-export const INSTALLABLE: AgentKind[] = ["claude"];
+export const INSTALLABLE: AgentKind[] = ["cotenk", "claude"];
 
 type SetupState = {
   setup: Partial<Record<AgentKind, AgentSetup>>;
@@ -83,15 +115,24 @@ type SetupState = {
   guideKind: AgentKind;
   check: (kind: AgentKind) => Promise<AgentSetup | null>;
   checkNode: () => Promise<NodeStatus | null>;
-  /** Runs the agent's sign-in flow and waits until it reports success. */
+  /**
+   * Runs the agent's sign-in flow and waits until it reports success.
+   * The CoTenk Agent has no sign-in; it opens the guide's key step.
+   */
   connect: (kind: AgentKind) => Promise<boolean>;
+  /**
+   * Switches the CoTenk Agent to `provider` and saves its key (null
+   * removes it, undefined keeps the stored one); the next turn restarts
+   * the agent with it.
+   */
+  saveCotenkKey: (provider: ProviderId, key?: string | null) => Promise<void>;
   /** Installs the CLI in a terminal and waits until it's found. */
   install: (kind: AgentKind) => Promise<boolean>;
   openGuide: (kind?: AgentKind) => void;
   closeGuide: () => void;
 };
 
-const isReady = (s?: AgentSetup) => !!s && s.installed && s.authed;
+export const isReady = (s?: AgentSetup) => !!s && s.installed && s.authed;
 
 /**
  * Until someone picks an agent, default to one that actually works —
@@ -171,7 +212,27 @@ export const useAgentSetup = create<SetupState>()((set, get) => ({
   },
   closeGuide: () => set({ guideOpen: false }),
 
+  saveCotenkKey: async (provider, key) => {
+    const before = useCotenkAgent.getState().provider;
+    useCotenkAgent.getState().saveKey(provider, key);
+    const switched = useCotenkAgent.getState().provider !== before;
+    await acpClient("cotenk").kill();
+    if (switched) {
+      // Models and the picked default belong to the old provider.
+      useAgent.setState((s) => ({
+        models: { ...s.models, cotenk: [] },
+        currentModel: { ...s.currentModel, cotenk: null },
+      }));
+      useAgent.getState().setDefaultModel("cotenk", "");
+    }
+    await get().check("cotenk");
+  },
+
   connect: async (kind) => {
+    if (kind === "cotenk") {
+      get().openGuide("cotenk");
+      return false;
+    }
     if (get().connecting) return false;
     set({ connecting: kind });
     try {
@@ -193,3 +254,22 @@ export const useAgentSetup = create<SetupState>()((set, get) => ({
     }
   },
 }));
+
+/** Checks Node.js and every agent while a setup surface is open. */
+export function useSetupProbes() {
+  const check = useAgentSetup((s) => s.check);
+  const checkNode = useAgentSetup((s) => s.checkNode);
+  const desktop = isDesktop();
+  useEffect(() => {
+    if (!desktop) return;
+    void checkNode();
+    AGENT_KINDS.forEach((k) => void check(k));
+  }, [desktop, check, checkNode]);
+}
+
+/** Makes `kind` the default and opens Ask agent on the welcome page. */
+export function tryOnWelcomePage(kind: AgentKind) {
+  useAgent.getState().setDefaultAgent(kind);
+  openWelcomePage();
+  useWorkspace.getState().requestAskAgent(WELCOME_ID);
+}

@@ -4,11 +4,15 @@ Think together. Work together. — An open workspace where people and AI
 agents share documents, tasks and context.
 
 Desktop app built with **Tauri + React + TypeScript + Tailwind CSS**.
-Local agents are embedded via ACP — **Claude Code** (through the
+Local agents are embedded via ACP — the built-in **CoTenk Agent**
+([OpenCode](https://github.com/sst/opencode), `opencode acp`, with your
+own API key), **Claude Code** (through the
 `@agentclientprotocol/claude-agent-acp` adapter) and **Devin CLI**
 (`devin acp`). The Rust backend spawns and owns one subprocess per
 agent, the frontend speaks JSON-RPC over it. Each chat is bound to one
 agent; Settings → Agents shows the connection state and the default.
+On first start the desktop app asks which agents to use and walks
+through setting each one up (`src/components/agents/agent-onboarding.tsx`).
 
 ### Skills & MCP servers
 
@@ -16,6 +20,12 @@ Settings → Skills & MCP manages skills and MCP servers that are **only
 usable inside CoTenk** — nothing goes into `~/.claude` or Devin's user
 config, so `claude` / `devin` run outside the app can't use them:
 
+- **CoTenk Agent** — its whole config travels in the process
+  environment (`OPENCODE_CONFIG_CONTENT`, merged over any
+  `opencode.json`): the chosen provider and key, `permission` set to ask
+  for edits and commands, and `skills.paths` pointing at CoTenk's skills
+  folder. MCP servers go into `mcpServers` of `session/new`. Nothing is
+  written to `~/.config/opencode` or the workspace.
 - **Claude Code** — everything is handed over per ACP session
   (`session/new`): skills are written to
   `<app data>/extensions/cotenk/` and loaded as a session plugin
@@ -35,6 +45,15 @@ The workspace guide (`src/lib/agent/cotenk-skill.md`) ships the same way
 as the built-in `cotenk-workspace` skill. Signed in, the list syncs to
 Supabase (`agent_extensions`, migration `20261002_agent_extensions.sql`);
 secret values (env vars, headers) stay on the device.
+
+### CoTenk Agent setup
+
+Needs only an API key (Anthropic, OpenAI, OpenRouter, Google, DeepSeek
+or Mistral), pasted in onboarding or Settings → Agents. Keys are stored
+per provider on the device and never sync. OpenCode starts from a
+global install (`npm install -g opencode-ai`, or `OPENCODE_BIN`) and
+otherwise through `npx -y opencode-ai acp`, so Node.js is the only
+requirement.
 
 ### Claude Code setup
 

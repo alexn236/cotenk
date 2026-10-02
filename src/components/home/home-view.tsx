@@ -406,7 +406,7 @@ function GettingStarted() {
   const steps: Step[] = desktop
     ? [
         {
-          label: "Connect an agent — Claude Code or Devin",
+          label: "Connect an agent — CoTenk Agent, Claude Code or Devin",
           done: agentReady,
           cta: "Set up",
           run: () => openGuide(),

@@ -17,6 +17,7 @@ import {
 } from "@/lib/analytics";
 import { acpClient, killAllAgents } from "@/lib/agent/acp-client";
 import { AGENT_KINDS, AGENTS, type AgentKind } from "@/lib/agents";
+import { CotenkKeyForm } from "@/components/agents/cotenk-key-form";
 import {
   apiKeyOverride,
   DESKTOP_ONLY_MESSAGE,
@@ -425,7 +426,9 @@ function AgentCard({ kind }: { kind: AgentKind }) {
         desc={setup ? setup.detail : "Checking…"}
       >
         <div className="flex items-center gap-2">
-          {setup?.installed && !setup.authed ? (
+          {kind === "cotenk" && setup?.installed && !setup.authed ? (
+            <Badge>Needs API key</Badge>
+          ) : setup?.installed && !setup.authed ? (
             <SmallButton accent onClick={() => void connect(kind)}>
               {connecting === kind ? "Waiting for sign-in…" : "Connect"}
             </SmallButton>
@@ -451,7 +454,12 @@ function AgentCard({ kind }: { kind: AgentKind }) {
           )}
         </div>
       </Row>
-      {setup?.hint && (
+      {kind === "cotenk" && setup?.installed && (
+        <div className="px-4 py-3">
+          <CotenkKeyForm />
+        </div>
+      )}
+      {setup?.hint && !(kind === "cotenk" && setup.installed) && (
         <div className="px-4 py-2.5 text-[12px] leading-relaxed text-ink-3">
           {setup.hint}{" "}
           <button

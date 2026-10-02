@@ -106,6 +106,7 @@ const AGENT_NAMES = new Set([
   "ai",
   "devin",
   "claude",
+  "cotenk",
   "codex",
   "gemini",
   "copilot",

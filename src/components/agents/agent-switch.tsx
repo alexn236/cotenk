@@ -43,7 +43,7 @@ export function AgentSwitch({
     <div
       role="radiogroup"
       aria-label="Agent"
-      className="grid grid-cols-2 gap-0.5 rounded-[8px] border border-line-soft bg-panel-2 p-0.5"
+      className="grid grid-cols-3 gap-0.5 rounded-[8px] border border-line-soft bg-panel-2 p-0.5"
     >
       {AGENT_KINDS.map((k) => {
         const active = k === value;
@@ -56,14 +56,14 @@ export function AgentSwitch({
             disabled={disabled && !active}
             onClick={() => onChange(k)}
             title={AGENTS[k].blurb}
-            className={`flex h-6 flex-1 items-center justify-center gap-1.5 rounded-[6px] px-2 text-[11.5px] transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40 ${
+            className={`flex h-6 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[6px] px-2 text-[11.5px] transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40 ${
               active
                 ? "bg-panel text-ink shadow-[0_1px_3px_var(--color-shadow)]"
                 : "text-ink-3 hover:text-ink-2"
             }`}
           >
             <SetupDot kind={k} />
-            {AGENTS[k].name}
+            <span className="truncate">{AGENTS[k].name}</span>
           </button>
         );
       })}

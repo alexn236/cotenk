@@ -4,6 +4,7 @@ import { docRelativePath } from "./file-sync";
 
 /** Where each agent finds the full workspace guide (see extensions-runtime). */
 const GUIDE: Record<AgentKind, string> = {
+  cotenk: "the cotenk-workspace skill (load it with your skill tool)",
   claude: "the cotenk-workspace skill",
   devin:
     'the cotenk-workspace skill — load it with the load_skill tool of the "cotenk" MCP server, which also carries the tools of the MCP servers enabled in CoTenk',

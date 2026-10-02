@@ -439,7 +439,9 @@ export const useAgent = create<AgentState>()((set, get) => ({
   runningChatId: null,
   models: perAgent(() => []),
   currentModel: perAgent(() => null),
-  defaultAgent: isAgentKind(storedAgent) ? storedAgent : "devin",
+  // Fresh installs start on the built-in agent; setup moves the default
+  // to whichever agent gets connected (agent-setup.ts autoPickDefault).
+  defaultAgent: isAgentKind(storedAgent) ? storedAgent : "cotenk",
   defaultModels: perAgent((a) => readPref(modelKey(a)) ?? ""),
   thought: null,
   usage: null,

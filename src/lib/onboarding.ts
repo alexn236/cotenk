@@ -27,6 +27,11 @@ export const dismissOnboarding = () => write(DISMISSED_KEY);
 export const onboardingComplete = () => read(COMPLETE_KEY);
 export const completeOnboarding = () => write(COMPLETE_KEY);
 
+/** The first-run "pick your agents" dialog was finished or skipped. */
+const AGENTS_KEY = "cotenk-onboarding-agents";
+export const agentOnboardingDone = () => read(AGENTS_KEY);
+export const finishAgentOnboarding = () => write(AGENTS_KEY);
+
 /** Open on Home (with the checklist) until onboarding is behind us. */
 export const onboardingPending = () =>
   typeof window !== "undefined" &&

@@ -1,23 +1,24 @@
-import { useEffect, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { ArrowRight, Check } from "@phosphor-icons/react";
 import { Modal } from "@/components/ui/modal";
 import { btn } from "@/components/ui/styles";
-import { INSTALLABLE, useAgentSetup, type AgentSetup } from "@/lib/agent-setup";
-import { useAgent } from "@/lib/agent-store";
-import { AGENTS, type AgentKind } from "@/lib/agents";
-import { openWelcomePage, useWorkspace } from "@/lib/store";
-import { WELCOME_ID } from "@/lib/welcome";
+import {
+  INSTALLABLE,
+  isReady,
+  tryOnWelcomePage,
+  useAgentSetup,
+  useSetupProbes,
+} from "@/lib/agent-setup";
+import { AGENT_KINDS, AGENTS, type AgentKind } from "@/lib/agents";
 import {
   DESKTOP_DOWNLOAD_URL,
   DESKTOP_ONLY_MESSAGE,
   isDesktop,
   openExternal,
 } from "@/lib/workspace";
+import { CotenkKeyForm } from "./cotenk-key-form";
 
-const CHOICES: AgentKind[] = ["claude", "devin"];
 const NODE_URL = "https://nodejs.org/en/download";
-
-const ready = (s?: AgentSetup) => !!s && s.installed && s.authed;
 
 type StepState = "done" | "current" | "later";
 
@@ -73,70 +74,132 @@ function Step({
 }
 
 /**
- * Guided agent setup: pick an agent, then Node.js → install → sign in,
- * each step with its own button and a live check. Replaces "run these
- * npm commands in a terminal" from the README — the terminal still
- * opens (people should see what runs), but CoTenk drives it.
+ * Guided agent setup: pick an agent, then Node.js → install → sign in
+ * (or an API key for the CoTenk Agent), each step with its own button
+ * and a live check. Replaces "run these npm commands in a terminal" from
+ * the README — the terminal still opens (people should see what runs),
+ * but CoTenk drives it.
  */
 export function AgentSetupGuide() {
   const open = useAgentSetup((s) => s.guideOpen);
   const close = useAgentSetup((s) => s.closeGuide);
   return (
-    <Modal open={open} onClose={close} title="Connect an agent" width={520}>
+    <Modal open={open} onClose={close} title="Connect an agent" width={540}>
       {open && <GuideBody onClose={close} />}
     </Modal>
+  );
+}
+
+/** What the browser build shows instead — agents need the desktop app. */
+export function DesktopOnly() {
+  return (
+    <div className="flex flex-col items-start gap-3 p-4">
+      <p className="text-[13px] leading-relaxed text-ink-2">
+        {DESKTOP_ONLY_MESSAGE}
+      </p>
+      <button
+        type="button"
+        onClick={() => openExternal(DESKTOP_DOWNLOAD_URL)}
+        className={btn.primary}
+      >
+        Get the desktop app
+      </button>
+    </div>
   );
 }
 
 function GuideBody({ onClose }: { onClose: () => void }) {
   const kind = useAgentSetup((s) => s.guideKind);
   const setup = useAgentSetup((s) => s.setup);
-  const node = useAgentSetup((s) => s.node);
-  const installing = useAgentSetup((s) => s.installing);
-  const connecting = useAgentSetup((s) => s.connecting);
-  const check = useAgentSetup((s) => s.check);
-  const checkNode = useAgentSetup((s) => s.checkNode);
-  const install = useAgentSetup((s) => s.install);
-  const connect = useAgentSetup((s) => s.connect);
-  const setDefaultAgent = useAgent((s) => s.setDefaultAgent);
-  const desktop = isDesktop();
+  useSetupProbes();
 
-  useEffect(() => {
-    if (!desktop) return;
-    void checkNode();
-    CHOICES.forEach((k) => void check(k));
-  }, [desktop, check, checkNode]);
+  if (!isDesktop()) return <DesktopOnly />;
 
-  if (!desktop) {
-    return (
-      <div className="flex flex-col items-start gap-3 p-4">
-        <p className="text-[13px] leading-relaxed text-ink-2">
-          {DESKTOP_ONLY_MESSAGE}
-        </p>
-        <button
-          type="button"
-          onClick={() => openExternal(DESKTOP_DOWNLOAD_URL)}
-          className={btn.primary}
-        >
-          Get the desktop app
-        </button>
+  return (
+    <div className="flex flex-col gap-4 p-4">
+      <div className="flex flex-wrap gap-1.5">
+        {AGENT_KINDS.map((k) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => useAgentSetup.setState({ guideKind: k })}
+            aria-pressed={k === kind}
+            className={`flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12.5px] transition-colors ${
+              k === kind
+                ? "border-accent bg-accent-dim text-ink"
+                : "border-line bg-panel text-ink-2 hover:bg-hover"
+            }`}
+          >
+            {isReady(setup[k]) && (
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/80" />
+            )}
+            {AGENTS[k].name}
+            {k === "cotenk" && (
+              <span className="text-[11px] text-ink-3">built in</span>
+            )}
+          </button>
+        ))}
       </div>
-    );
-  }
+      <AgentIntro kind={kind} />
+      <AgentSteps kind={kind} />
+
+      {isReady(setup[kind]) && (
+        <div className="flex items-center justify-between gap-3 rounded-[10px] border border-accent-line bg-accent-dim/40 px-3 py-3">
+          <span className="text-[13px] text-ink">
+            {AGENTS[kind].name} is ready.
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              tryOnWelcomePage(kind);
+            }}
+            className={btn.primary}
+          >
+            Try it on the welcome page
+            <ArrowRight size={12} weight="bold" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** What the agent is and how far it reaches, in one paragraph. */
+export function AgentIntro({ kind }: { kind: AgentKind }) {
+  const what =
+    kind === "cotenk"
+      ? "CoTenk's own agent, built on the open-source OpenCode. Bring an API key from Anthropic, OpenAI, OpenRouter, Google, DeepSeek or Mistral; it uses the skills and MCP servers you add under Settings → Agent customisation."
+      : `${AGENTS[kind].blurb}.`;
+  return (
+    <p className="text-[12.5px] leading-relaxed text-ink-3">
+      {what} It runs on your machine, starts in your workspace folder, and
+      asks before it changes a page. Changes outside that folder are
+      refused.
+    </p>
+  );
+}
+
+/**
+ * The setup steps of one agent — Node.js → install → sign in, or an API
+ * key for the CoTenk Agent — each with its own button and a live check.
+ */
+export function AgentSteps({ kind }: { kind: AgentKind }) {
+  const s = useAgentSetup((st) => st.setup[kind]);
+  const node = useAgentSetup((st) => st.node);
+  const installing = useAgentSetup((st) => st.installing);
+  const connecting = useAgentSetup((st) => st.connecting);
+  const check = useAgentSetup((st) => st.check);
+  const checkNode = useAgentSetup((st) => st.checkNode);
+  const install = useAgentSetup((st) => st.install);
+  const connect = useAgentSetup((st) => st.connect);
 
   const info = AGENTS[kind];
-  const s = setup[kind];
   const viaNpm = INSTALLABLE.includes(kind);
-  const nodeOk = !!node?.npm;
   const installed = !!s?.installed;
+  // An agent that is already installed doesn't need Node.js to get it.
+  const nodeOk = !!node?.npm || installed;
   const authed = !!s?.authed;
-
-  const tryIt = () => {
-    setDefaultAgent(kind);
-    onClose();
-    openWelcomePage();
-    useWorkspace.getState().requestAskAgent(WELCOME_ID);
-  };
 
   const steps: {
     title: string;
@@ -149,7 +212,9 @@ function GuideBody({ onClose }: { onClose: () => void }) {
       title: "Node.js",
       done: nodeOk,
       desc: nodeOk
-        ? `Node ${node?.node ?? ""} found.`
+        ? node?.node
+          ? `Node ${node.node} found.`
+          : "Not needed, the agent is already installed."
         : node
           ? `${info.name} installs through npm, which comes with Node.js. Install it, then check again.`
           : "Checking…",
@@ -164,7 +229,10 @@ function GuideBody({ onClose }: { onClose: () => void }) {
           </button>
           <button
             type="button"
-            onClick={() => void checkNode()}
+            onClick={() => {
+              void checkNode();
+              void check(kind);
+            }}
             className={btn.secondary}
           >
             Check again
@@ -174,10 +242,14 @@ function GuideBody({ onClose }: { onClose: () => void }) {
     });
   }
   steps.push({
-    title: `Install ${info.name}`,
+    title: kind === "cotenk" ? "Agent engine (OpenCode)" : `Install ${info.name}`,
     done: installed,
     desc: installed
-      ? (s?.detail ?? "Installed.")
+      ? kind === "cotenk"
+        ? (s?.detail.includes("npx")
+            ? "Ready. OpenCode is fetched through npx the first time the agent starts."
+            : "OpenCode is installed.")
+        : (s?.detail ?? "Installed.")
       : installing === kind
         ? "Installing in the terminal window — this takes a minute. This step ticks itself off when it's done."
         : viaNpm
@@ -202,81 +274,51 @@ function GuideBody({ onClose }: { onClose: () => void }) {
       </button>
     ),
   });
-  steps.push({
-    title: "Sign in",
-    done: authed,
-    desc: authed
-      ? "Signed in."
-      : connecting === kind
-        ? "Finish the sign-in in the window that opened — this step ticks itself off."
-        : `${info.name} signs in with its own account. Your login never passes through CoTenk.`,
-    actions: (
-      <button
-        type="button"
-        disabled={!!connecting}
-        onClick={() => void connect(kind)}
-        className={btn.primary}
-      >
-        {connecting === kind ? "Waiting for sign-in…" : "Sign in"}
-      </button>
-    ),
-  });
+  if (kind === "cotenk") {
+    steps.push({
+      title: "Add an API key",
+      done: authed,
+      desc: authed
+        ? (s?.detail.split(" · ")[0] ?? "Key saved.")
+        : "Pick your provider and paste a key. It stays on this device and only goes to that provider.",
+      actions: <CotenkKeyForm />,
+    });
+  } else {
+    steps.push({
+      title: "Sign in",
+      done: authed,
+      desc: authed
+        ? "Signed in."
+        : connecting === kind
+          ? "Finish the sign-in in the window that opened — this step ticks itself off."
+          : `${info.name} signs in with its own account. Your login never passes through CoTenk.`,
+      actions: (
+        <button
+          type="button"
+          disabled={!!connecting}
+          onClick={() => void connect(kind)}
+          className={btn.primary}
+        >
+          {connecting === kind ? "Waiting for sign-in…" : "Sign in"}
+        </button>
+      ),
+    });
+  }
   const firstOpen = steps.findIndex((x) => !x.done);
 
   return (
-    <div className="flex flex-col gap-4 p-4">
-      <div className="flex flex-wrap gap-1.5">
-        {CHOICES.map((k) => (
-          <button
-            key={k}
-            type="button"
-            onClick={() => useAgentSetup.setState({ guideKind: k })}
-            aria-pressed={k === kind}
-            className={`flex h-8 items-center gap-1.5 rounded-full border px-3 text-[12.5px] transition-colors ${
-              k === kind
-                ? "border-accent bg-accent-dim text-ink"
-                : "border-line bg-panel text-ink-2 hover:bg-hover"
-            }`}
-          >
-            {ready(setup[k]) && (
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/80" />
-            )}
-            {AGENTS[k].name}
-            {k === "claude" && (
-              <span className="text-[11px] text-ink-3">recommended</span>
-            )}
-          </button>
-        ))}
-      </div>
-      <p className="text-[12.5px] leading-relaxed text-ink-3">
-        {info.blurb}. It runs on your machine, starts in your workspace
-        folder, and asks before it changes a page — changes outside that
-        folder are refused.
-      </p>
-
-      <ol className="flex flex-col gap-2">
-        {steps.map((st, i) => (
-          <Step
-            key={st.title}
-            n={i + 1}
-            state={st.done ? "done" : i === firstOpen ? "current" : "later"}
-            title={st.title}
-            desc={st.desc}
-          >
-            {st.actions}
-          </Step>
-        ))}
-      </ol>
-
-      {firstOpen === -1 && (
-        <div className="flex items-center justify-between gap-3 rounded-[10px] border border-accent-line bg-accent-dim/40 px-3 py-3">
-          <span className="text-[13px] text-ink">{info.name} is ready.</span>
-          <button type="button" onClick={tryIt} className={btn.primary}>
-            Try it on the welcome page
-            <ArrowRight size={12} weight="bold" />
-          </button>
-        </div>
-      )}
-    </div>
+    <ol className="flex flex-col gap-2">
+      {steps.map((st, i) => (
+        <Step
+          key={st.title}
+          n={i + 1}
+          state={st.done ? "done" : i === firstOpen ? "current" : "later"}
+          title={st.title}
+          desc={st.desc}
+        >
+          {st.actions}
+        </Step>
+      ))}
+    </ol>
   );
 }
