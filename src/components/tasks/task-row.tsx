@@ -1,7 +1,6 @@
 import { motion, useReducedMotion } from "motion/react";
 import {
   ArrowUpRight,
-  CalendarBlank,
   Check,
   FileText,
   Lightning,
@@ -9,12 +8,8 @@ import {
 } from "@phosphor-icons/react";
 import { useWorkspace } from "@/lib/store";
 import { delegateTask, toggleTask } from "@/lib/task-actions";
-import {
-  dueBucket,
-  formatDue,
-  isAgentName,
-  type TaskItem,
-} from "@/lib/tasks";
+import { isAgentName, type TaskItem } from "@/lib/tasks";
+import { TaskSchedule } from "./task-schedule";
 
 const CHIP =
   "inline-flex h-[18px] items-center gap-1 rounded-full border px-1.5 text-[10.5px] leading-none";
@@ -37,7 +32,6 @@ export function TaskRow({
 }) {
   const setActiveDoc = useWorkspace((s) => s.setActiveDoc);
   const reduceMotion = useReducedMotion();
-  const bucket = dueBucket(task.due, today);
 
   return (
     <motion.div
@@ -75,22 +69,7 @@ export function TaskRow({
         >
           {task.text}
         </span>
-        {task.due && (
-          <span
-            className={`${CHIP} ${
-              task.done
-                ? "border-line-soft text-ink-3"
-                : bucket === "overdue"
-                  ? "border-danger/40 text-danger"
-                  : bucket === "today"
-                    ? "border-accent-line text-accent"
-                    : "border-line text-ink-2"
-            }`}
-          >
-            <CalendarBlank size={10} />
-            {formatDue(task.due, today)}
-          </span>
-        )}
+        <TaskSchedule task={task} today={today} />
         {task.assignees.map((a) => (
           <span
             key={a}

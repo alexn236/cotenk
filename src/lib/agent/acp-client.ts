@@ -8,7 +8,17 @@ import {
 } from "../workspace";
 import type { ModelOption } from "../agent-models";
 import { AGENTS, type AgentKind } from "../agents";
-import { installWorkspaceSkill } from "./workspace-skill";
+import {
+  prepareAgent,
+  sessionExtensions,
+  type SessionExtensions,
+} from "./extensions-runtime";
+import {
+  cancelPermissions,
+  requestPermission,
+  type FileDiff,
+  type PermissionOption,
+} from "../agent-permissions";
 
 /**
  * ACP (Agent Client Protocol) client for the local agents — `devin acp`
@@ -81,6 +91,8 @@ class AcpClient {
   modes: { id: string; name: string }[] = [];
   busy = false;
   lastError: string | null = null;
+  /** `false` when the agent said it takes no images; unknown otherwise. */
+  private imageSupport: boolean | null = null;
 
   constructor(readonly kind: AgentKind) {}
 
@@ -126,8 +138,8 @@ class AcpClient {
 
   private async start(): Promise<void> {
     if (!isDesktop()) throw new Error(DESKTOP_ONLY_MESSAGE);
-    // Devin authenticates over ACP with the CLI's stored key; Claude Code
-    // reuses the `claude` login on this machine and needs no handshake.
+    // Devin authenticates over ACP with the CLI's stored key; the other
+    // agents reuse their CLI's login on this machine.
     let apiKey: string | null = null;
     if (this.kind === "devin") {
       apiKey =
@@ -141,15 +153,19 @@ class AcpClient {
     // Listeners must be attached before the process emits anything.
     await ensureListening();
     this.cwd = await resolveWorkspaceDir();
-    await installWorkspaceSkill(this.cwd);
-    await invoke("acp_spawn", { agent: this.kind, dir: this.cwd });
+    // Skills/MCP from Settings → Skills & MCP; a broken extension must
+    // not keep the agent from starting.
+    const env = await prepareAgent(this.kind, this.cwd).catch(() => ({}));
+    await invoke("acp_spawn", { agent: this.kind, dir: this.cwd, env });
     this.running = true;
 
-    await this.request("initialize", {
+    const init = (await this.request("initialize", {
       protocolVersion: 1,
       clientCapabilities: {},
       clientInfo: { name: "cotenk", version: "0.1.0" },
-    });
+    })) as { agentCapabilities?: { promptCapabilities?: { image?: boolean } } };
+    this.imageSupport =
+      init?.agentCapabilities?.promptCapabilities?.image === false ? false : null;
     if (apiKey) {
       await this.request("authenticate", {
         methodId: "devin-browser",
@@ -160,6 +176,7 @@ class AcpClient {
   }
 
   reset(reason: string) {
+    cancelPermissions(this.kind);
     this.running = false;
     this.sessions.clear();
     this.appliedModels.clear();
@@ -211,26 +228,98 @@ class AcpClient {
   private explain(err: { code: number; message: string }): string {
     // -32000 is ACP's authRequired.
     if (err.code === -32000 || /auth(entication)? required/i.test(err.message)) {
-      return this.kind === "claude"
-        ? "Claude Code is not signed in — connect it in Settings → Agents."
-        : "Devin CLI is not signed in — connect it in Settings → Agents.";
+      return `${this.label} is not signed in — connect it in Settings → Agents.`;
     }
     return err.message;
   }
 
-  /** Agent → client requests. Permissions are auto-approved (allow_once). */
+  /**
+   * Agent → client requests. Permission requests go through the review
+   * flow (agent-permissions.ts): reads pass, edits and commands wait for
+   * the person unless auto-approve is on.
+   */
   private onAgentRequest(msg: JsonRpcMsg) {
-    let result: unknown = {};
-    if (msg.method === "session/request_permission") {
-      const options =
-        (msg.params?.options as { optionId: string; kind?: string }[]) ??
-        [];
-      const opt = options.find((o) => o.kind === "allow_once") ?? options[0];
-      result = {
-        outcome: { outcome: "selected", optionId: opt?.optionId },
-      };
+    if (msg.method !== "session/request_permission") {
+      this.send({ jsonrpc: "2.0", id: msg.id!, result: {} });
+      return;
     }
-    this.send({ jsonrpc: "2.0", id: msg.id!, result });
+    const p = (msg.params ?? {}) as {
+      sessionId?: string;
+      options?: PermissionOption[];
+      toolCall?: {
+        title?: string;
+        kind?: string;
+        content?: {
+          type?: string;
+          path?: string;
+          oldText?: string | null;
+          newText?: string;
+        }[];
+        rawInput?: Record<string, unknown>;
+        locations?: { path?: string }[];
+      };
+    };
+    const tc = p.toolCall ?? {};
+    const diffs: FileDiff[] = (tc.content ?? [])
+      .filter((c) => c.type === "diff" && typeof c.newText === "string")
+      .map((c) => ({
+        path: c.path ?? "",
+        oldText: c.oldText ?? null,
+        newText: c.newText!,
+      }));
+    const raw = tc.rawInput ?? {};
+    const command =
+      typeof raw.command === "string"
+        ? raw.command
+        : Array.isArray(raw.command)
+          ? raw.command.join(" ")
+          : null;
+    // Every path the step names: diffs, ACP locations and common tool inputs.
+    const paths = new Set<string>(diffs.map((d) => d.path));
+    for (const l of tc.locations ?? []) if (l.path) paths.add(l.path);
+    for (const key of [
+      "file_path",
+      "filePath",
+      "path",
+      "old_path",
+      "new_path",
+      "source",
+      "destination",
+      "target",
+      "notebook_path",
+    ]) {
+      const v = raw[key];
+      if (typeof v === "string" && v) paths.add(v);
+    }
+    for (const key of ["paths", "file_paths"]) {
+      const v = raw[key];
+      if (Array.isArray(v)) {
+        for (const x of v) if (typeof x === "string" && x) paths.add(x);
+      }
+    }
+    const id = msg.id!;
+    void requestPermission({
+      paths: [...paths],
+      cwd: this.cwd,
+      agent: this.kind,
+      sessionId: p.sessionId ?? "",
+      title: tc.title ?? "Tool call",
+      // Edits without an explicit kind still carry diffs.
+      kind: tc.kind ?? (diffs.length > 0 ? "edit" : null),
+      diffs,
+      command,
+      options: p.options ?? [],
+    }).then((optionId) => {
+      this.send({
+        jsonrpc: "2.0",
+        id,
+        result: {
+          outcome: optionId
+            ? { outcome: "selected", optionId }
+            : { outcome: "cancelled" },
+        },
+      });
+    });
   }
 
   private onNotification(msg: JsonRpcMsg) {
@@ -335,9 +424,12 @@ class AcpClient {
       }
       return existing;
     }
+    const ext: SessionExtensions = await sessionExtensions(this.kind).catch(
+      () => ({ mcpServers: [] }),
+    );
     const res = (await this.request("session/new", {
       cwd: this.cwd ?? ".",
-      mcpServers: [],
+      ...ext,
     })) as { sessionId: string; configOptions?: ConfigOption[] };
     this.sessions.set(chatKey, res.sessionId);
     this.captureModels(res.configOptions);
@@ -381,8 +473,12 @@ class AcpClient {
     text: string,
     model: string | undefined,
     onEvent: (e: AgentEvent) => void,
+    images: { data: string; mimeType: string }[] = [],
   ): Promise<void> {
     if (this.busy) throw new Error(`${this.label} is already running a turn.`);
+    if (images.length > 0 && this.imageSupport === false) {
+      throw new Error(`${this.label} doesn't accept images.`);
+    }
     const sessionId = await this.ensureSession(chatKey, model);
     this.busy = true;
     const listener = (e: AgentEvent) => onEvent(e);
@@ -390,7 +486,10 @@ class AcpClient {
     try {
       const res = (await this.request("session/prompt", {
         sessionId,
-        prompt: [{ type: "text", text }],
+        prompt: [
+          { type: "text", text },
+          ...images.map((i) => ({ type: "image", ...i })),
+        ],
       })) as { stopReason?: string };
       onEvent({ type: "done", stopReason: res?.stopReason ?? "end_turn" });
     } finally {
@@ -400,6 +499,8 @@ class AcpClient {
   }
 
   cancel(chatKey?: string) {
+    // Pending approvals must be answered "cancelled" per ACP.
+    cancelPermissions(this.kind);
     const sessionId = chatKey
       ? this.sessions.get(chatKey)
       : [...this.sessions.values()][0];

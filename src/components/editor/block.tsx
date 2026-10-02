@@ -18,7 +18,14 @@ import { looksLikeEmbed, serializeBlocks } from "@/lib/blocks";
 import type { BlockData, BlockType } from "@/lib/blocks";
 import { useWorkspace } from "@/lib/store";
 import { decorateTaskText } from "@/lib/tasks";
+import {
+  embedApiScript,
+  MAX_EMBED_STATE,
+  splitEmbedState,
+} from "@/lib/embed-state";
 import { Markdown } from "./markdown";
+import { FileBody, ImageBody } from "./attachment-blocks";
+import { useSuggest } from "@/components/ui/use-suggest";
 import { autosizeTextarea, useIsomorphicLayoutEffect } from "./utils";
 
 function useMediaQuery(query: string): boolean {
@@ -169,8 +176,8 @@ function embedThemeCss(scheme: string): string {
  * --ck-* variables (e.g. var(--ck-accent)) so agent-built widgets match
  * light and dark mode without knowing either.
  */
-function embedDoc(html: string, scheme: string): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><style>${embedThemeCss(scheme)}html,body{margin:0;padding:0;background:transparent}body{color:var(--ck-ink);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}</style></head><body>${html}${EMBED_HEIGHT_SCRIPT}</body></html>`;
+function embedDoc(html: string, scheme: string, state: string | null): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${embedThemeCss(scheme)}html,body{margin:0;padding:0;background:transparent}body{color:var(--ck-ink);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}</style>${embedApiScript(state)}</head><body>${html}${EMBED_HEIGHT_SCRIPT}</body></html>`;
 }
 
 export type BlockProps = {
@@ -202,6 +209,8 @@ export type BlockProps = {
   onInsertBelow: () => void;
   onToggleChecked: (checked: boolean) => void;
   onLangChange: (lang: string) => void;
+  /** An embed called cotenk.save(data) — `json` is the new state. */
+  onEmbedState: (json: string) => void;
 };
 
 /**
@@ -229,11 +238,26 @@ export function Block({
   onInsertBelow,
   onToggleChecked,
   onLangChange,
+  onEmbedState,
 }: BlockProps) {
   const reduceMotion = useReducedMotion();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const editWrapRef = useRef<HTMLDivElement | null>(null);
   const getEditAnchor = useCallback(() => editWrapRef.current, []);
+  // "@" people and agents, "[[" pages, "due:" dates — in prose blocks.
+  const suggest = useSuggest({
+    ref: textareaRef,
+    value: block.text,
+    onChange: onTextChange,
+    mode: "page",
+    enabled:
+      editing &&
+      block.type !== "code" &&
+      block.type !== "embed" &&
+      block.type !== "divider" &&
+      block.type !== "image" &&
+      block.type !== "file",
+  });
 
   // Callback refs: the edit element mounts deferred (AnimatePresence
   // mode="wait"), so registration + queued caret apply on attach.
@@ -291,6 +315,7 @@ export function Block({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (suggest.onKeyDown(e)) return;
     if (onSlashKey(e)) return;
     const el = e.currentTarget;
     switch (e.key) {
@@ -354,6 +379,18 @@ export function Block({
         onCommit();
         break;
     }
+  };
+
+  /** Selected image / file: Backspace removes it, unless a caption is being typed. */
+  const onAttachmentKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).tagName === "INPUT") {
+      if (e.key === "Enter" || e.key === "Escape") {
+        e.preventDefault();
+        e.currentTarget.focus();
+      }
+      return;
+    }
+    onDividerKeyDown(e);
   };
 
   const onEditBlur = (e: FocusEvent<HTMLDivElement>) => {
@@ -453,7 +490,28 @@ export function Block({
             exit={{ opacity: 0, scale: reduceMotion ? 1 : 0.995 }}
             transition={swapTransition}
           >
-            {block.type === "divider" ? (
+            {block.type === "image" || block.type === "file" ? (
+              <div
+                ref={setDividerRef}
+                role="button"
+                tabIndex={-1}
+                aria-label={block.type === "image" ? "Image, selected" : "File, selected"}
+                onKeyDown={onAttachmentKeyDown}
+                onBlur={onEditBlur}
+                className="rounded-[8px] outline-2 outline-offset-2 outline-accent"
+              >
+                {block.type === "image" ? (
+                  <ImageBody
+                    md={block.text}
+                    selected
+                    onChange={onTextChange}
+                    onDelete={onDelete}
+                  />
+                ) : (
+                  <FileBody md={block.text} selected onDelete={onDelete} />
+                )}
+              </div>
+            ) : block.type === "divider" ? (
               <div
                 ref={setDividerRef}
                 role="button"
@@ -517,8 +575,10 @@ export function Block({
                     aria-label="Block text"
                     onChange={onChange}
                     onKeyDown={onKeyDown}
+                    {...suggest.fieldProps}
                     className={`block w-full resize-none bg-transparent py-1 outline-none placeholder:text-ink-3 ${typo}`}
                   />
+                  {suggest.menu}
                 </div>
                 {block.type === "embed" && (
                   <EmbedPreview
@@ -539,7 +599,20 @@ export function Block({
             exit={{ opacity: 0, scale: reduceMotion ? 1 : 0.995 }}
             transition={swapTransition}
           >
-            {block.type === "divider" ? (
+            {block.type === "image" || block.type === "file" ? (
+              <div className="cursor-pointer" onClick={onStartEdit}>
+                {block.type === "image" ? (
+                  <ImageBody
+                    md={block.text}
+                    selected={false}
+                    onChange={onTextChange}
+                    onDelete={onDelete}
+                  />
+                ) : (
+                  <FileBody md={block.text} selected={false} onDelete={onDelete} />
+                )}
+              </div>
+            ) : block.type === "divider" ? (
               <div
                 role="button"
                 tabIndex={-1}
@@ -550,7 +623,11 @@ export function Block({
                 <hr className="border-t border-line" />
               </div>
             ) : block.type === "embed" ? (
-              <EmbedView html={block.text} onStartEdit={onStartEdit} />
+              <EmbedView
+                html={block.text}
+                onStartEdit={onStartEdit}
+                onSave={onEmbedState}
+              />
             ) : (
               <div
                 className="min-h-[1.72em] cursor-text"
@@ -582,28 +659,57 @@ export function EmbedFrame({
   html,
   title,
   maxHeight = 600,
+  onSave,
 }: {
   html: string;
   title: string;
   maxHeight?: number;
+  /** Receives cotenk.save() payloads (JSON). Omit for read-only frames. */
+  onSave?: (json: string) => void;
 }) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const [height, setHeight] = useState(80);
   // Re-render the frame when the app theme flips so --ck-* stay in sync.
   const theme = useWorkspace((s) => s.theme);
-  const srcDoc = useMemo(() => embedDoc(html, theme), [html, theme]);
+  const { body, state } = splitEmbedState(html);
+  // The frame only reloads when the embed's code or the theme changes —
+  // a saved-state update (the widget's own cotenk.save) must not reset
+  // the widget mid-interaction. Latched on change, React's derive-state
+  // pattern.
+  const [frame, setFrame] = useState({ body, theme, state });
+  if (frame.body !== body || frame.theme !== theme) {
+    setFrame({ body, theme, state });
+  }
+  const srcDoc = useMemo(
+    () => embedDoc(frame.body, frame.theme, frame.state),
+    [frame],
+  );
+  const onSaveRef = useRef(onSave);
+  useEffect(() => {
+    onSaveRef.current = onSave;
+  });
 
   useEffect(() => {
+    let saveTimer: ReturnType<typeof setTimeout> | null = null;
     const onMessage = (e: MessageEvent) => {
       if (e.source !== iframeRef.current?.contentWindow) return;
-      const h = (e.data as { cotenkEmbedHeight?: unknown })
-        ?.cotenkEmbedHeight;
+      const data = e.data as { cotenkEmbedHeight?: unknown; cotenkSave?: unknown };
+      const h = data?.cotenkEmbedHeight;
       if (typeof h === "number" && Number.isFinite(h)) {
         setHeight(Math.min(maxHeight, Math.max(80, Math.ceil(h))));
       }
+      const json = data?.cotenkSave;
+      if (typeof json === "string" && json.length <= MAX_EMBED_STATE) {
+        // Sliders fire saves per pixel — write the last one.
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => onSaveRef.current?.(json), 250);
+      }
     };
     window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      if (saveTimer) clearTimeout(saveTimer);
+    };
   }, [maxHeight]);
 
   return (
@@ -724,9 +830,11 @@ function EmbedPreview({
 function EmbedView({
   html,
   onStartEdit,
+  onSave,
 }: {
   html: string;
   onStartEdit: () => void;
+  onSave: (json: string) => void;
 }) {
   return (
     <div>
@@ -745,7 +853,7 @@ function EmbedView({
           HTML · sandboxed
         </span>
       </div>
-      <EmbedFrame html={html} title="Embedded HTML" />
+      <EmbedFrame html={html} title="Embedded HTML" onSave={onSave} />
     </div>
   );
 }

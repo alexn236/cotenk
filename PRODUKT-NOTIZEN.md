@@ -1,6 +1,6 @@
 # CoTenk – Produkt-Notizen
 
-Stand: 24.09.2026. Dieses Dokument enthält drei Teile:
+Stand: 27.09.2026. Dieses Dokument enthält drei Teile:
 
 1. was umgesetzt wurde,
 2. meine Gedanken zu Positionierung und Product-Market-Fit,
@@ -61,6 +61,41 @@ Stand: 24.09.2026. Dieses Dokument enthält drei Teile:
 - Im Browser durchgeklickt (mit temporärem Test-Harness ohne Login, danach wieder gelöscht): Palette, Slash-Menü, Chart-Embed, Ask-agent-Popover, Seitenmenü, externe Änderung mit Undo, Löschen und Undo, Vorlage installieren, Ordner anlegen, umbenennen und verschieben, Publish-Dialog, Light und Dark.
 - **Nicht getestet**: der echte Devin-Agent (braucht die Desktop-App mit Devin-Login) und echtes Publish gegen Supabase (braucht die Migration und einen Login).
 
+### Nachtrag 27.09. — Sync-Härtung und Welcome v2
+- **Datenverlust-Bugs im Sync behoben** (beim Durchgehen von Login-Merge und Sign-out gefunden):
+  - Schlug der erste Pull fehl (offline), durfte der Sync trotzdem pushen – und löschte dabei jede Remote-Seite, die lokal fehlte. Jetzt: kein Push vor erfolgreichem Pull, Pull wird mit Backoff wiederholt.
+  - Gelöscht wird remote nur noch, was lokal explizit gelöscht wurde (nicht mehr „fehlt lokal“). Gepusht werden nur geänderte Zeilen.
+  - Desktop: Der Datei-Mirror startete bei einem fehlgeschlagenen Pull und glich den Ordner gegen die Seed-Seiten ab → alle Account-Dateien wurden von der Platte gelöscht. Er wartet jetzt auf einen erfolgreichen Pull.
+  - Sign-out verwarf Änderungen im 900-ms-Debounce. Jetzt wird vorher geflusht (Seiten und Agent-Chats).
+  - **Sign-out auf dem Desktop löscht keine Dateien mehr.** Der Ordner gehört dem Nutzer (ggf. ein Obsidian-Vault); die Seiten bleiben lokal. Im Browser wird wie bisher auf die Seed-Seiten zurückgesetzt.
+- **Welcome-Seite versioniert** (`d-welcome-v2`, `src/lib/welcome.ts`): Accounts mit einer *unveränderten* alten Version bekommen die neue; bearbeitete Kopien bleiben. Fingerprint ignoriert Datums-, Häkchen- und Widget-Zustand.
+- **Web-Hinweis**: Im Browser zeigt die Welcome-Seite „Get the desktop app — agents run there“ statt „Connect an agent“; „Ask agent“ im Web bietet im Toast „Get the app“. URL über `VITE_DESKTOP_DOWNLOAD_URL` (Standard: GitHub Releases).
+- **Marketplace ohne Login lesbar**: `20260927_marketplace_public_read.sql` (Policy für `anon`, Install-Zähler auch anonym).
+- **Externe Links** in Seiten öffnen im System-Browser (`open_url`), statt die App-Webview wegzunavigieren.
+- **Geprüft (27.09.)**: `tsc`, `eslint`, `vite build`, `cargo check` grün. Headless-Chrome-Durchlauf gegen den Dev-Server (23 Checks, alle grün, keine Konsolenfehler): Welcome/CTA im Web, Chart-Hover am Rand, Theme-Wechsel in Embeds, Slider-Zustand übersteht Reload, Notion-ZIP per Drop, Wikilink + Backlinks, Seite per Drag in Root, Kanban-Drag setzt `due:`, Community ohne Login, Palette-Import, Review-Dialog (Blockzahl, Allow, Reads ohne Prompt). **Nicht getestet**: echter Login-Merge und Realtime gegen Supabase (kein Test-Account, Migrationen nicht angewendet), echte Agents (Claude/Devin/Gemini) in der Desktop-App.
+
+### Nachtrag 28.09. — Mehrere Nutzer, Profile, Onboarding
+- **Seiten-Schlüssel pro Workspace** (`20260928_workspaces_profiles.sql`): `docs`/`folders` haben jetzt `(workspace_id, id)` als Primärschlüssel. Vorher war vermutlich `id` allein der Schlüssel, und die Seed-Seiten tragen feste IDs (`d-welcome-v2` …) – ein zweiter Account konnte seine Welcome-Seite dann nicht hochladen (RLS-Fehler, ganzer Batch scheitert). Das Schema von `docs`/`folders` stand bisher in keiner Migration; die neue legt es an bzw. übernimmt bestehende Tabellen. **Nicht gegen Supabase geprüft** (kein Zugang von hier) – bitte vorher mit `select pg_get_constraintdef(oid) from pg_constraint where conrelid = 'public.docs'::regclass and contype = 'p';` nachsehen und danach mit zwei Test-Accounts gegenprüfen.
+- **Neue IDs sind zufällige UUIDs** (`src/lib/ids.ts`) für Seiten, Ordner, Chats, Importe und Listings.
+- **Workspaces + Mitglieder**: jeder Account hat einen persönlichen Workspace (Trigger bei Sign-up, Backfill für bestehende). RLS läuft über `workspace_members` (owner/editor/viewer). Geteilte Workspaces brauchen „nur“ noch Einladungen und eine Workspace-Auswahl in der UI.
+- **Agent-Chat-Sync repariert**: löscht remote nur noch, was lokal gelöscht wurde; kein Push vor erfolgreichem Pull; nur geänderte Chats werden hochgeladen.
+- **Lokal und Account getrennt**: Abgemeldet = Seiten dieses Geräts (Browser-Cache + eigener Ordner). Angemeldet = Account-Workspace + eigener Ordner `~/Documents/CoTenk (name)`. Beim ersten Login fragt ein Dialog, ob lokale Seiten in den Account wandern. Wer nach dem Update zuerst die App nutzt, behält den bisherigen Ordner.
+- **Profile**: Anzeigename (Sign-up, Settings → Account, Publish-Dialog). Der Marketplace zeigt nie mehr den E-Mail-Präfix; bestehende Listings mit automatisch abgeleitetem Autor werden in der Migration auf Anzeigename bzw. „Anonymous“ gesetzt.
+- **Passwort vergessen / ändern**: Reset per Code aus der E-Mail (Desktop) oder Link (Web). Braucht `{{ .Token }}` im Supabase-Template „Reset Password“.
+- **Onboarding an einem Ort**: Home-Checkliste mit 3 Schritten (Agent verbinden → Agent ändert eine Seite → Notizen importieren); die App startet auf Home, bis sie erledigt oder ausgeblendet ist. Im Web: Notizen, Desktop-App, Login.
+- **Geführtes Agent-Setup** (Dialog): Node.js prüfen → CLI per Klick installieren (Terminal mit festem `npm install -g …`) → Sign-in → „Try it on the welcome page“ öffnet direkt „Ask agent“.
+- **Geprüft**: `tsc`, `eslint`, `vite build`, `cargo check`. **Nicht getestet**: Migration gegen eine echte Datenbank, Login-/Merge-Flow, Passwort-Reset, Installation über den Setup-Dialog in der Desktop-App.
+
+### Nachtrag 02.10. — Daten, Verlauf, Anhänge, Tasks
+- **Version history + "Recently deleted"** (`20261005_history_cleanup_account.sql`): Ein Datenbank-Trigger auf `docs` legt Versionen an (vor jeder Bearbeitungsphase, höchstens alle 10 Minuten, 40 pro Seite) und sichert jede gelöschte Seite 60 Tage. Unabhängig vom Client, also auch bei Sync-Fehlern. UI: Seitenmenü → Version history; Settings → Data & backup → Recently deleted. Nur mit Account.
+- **Export + Konto löschen** (Settings → Data & backup): ZIP mit Seiten als Markdown (Ordner/Unterseiten als Verzeichnisse), Chats, Bildern und Dateien (relative Links). Konto löschen: entfernt erst alle Dateien im Storage, dann `delete_account()` (löscht `auth.users`, alles andere hängt per CASCADE dran). Bestätigung per E-Mail-Eingabe, Export-Angebot davor. Neuer Rust-Befehl `fs_write_b64` für das Speichern auf dem Desktop.
+- **Unbenutzte Dateien**: `referenced_note_files()` sucht in Seiten, Versionen und Chats. Settings → "Check now", außerdem wöchentlich leise nach einem Sync (nur Dateien älter als 3 Tage).
+- **Bilder**: eigener Bild-Block (nie Markdown-Text sichtbar), Größe per Griff ziehen (`#w=480` im Link), Bildunterschrift, Vergrößern (Lightbox), Löschen. **Dateianhänge** (`/file`, Einfügen): `[name](cotenk-file:pfad#s=bytes)`, bis 25 MB, Bucket `note-images` (mime-Beschränkung aufgehoben).
+- **Tasks**: Datums-Menü am Task (Heute/Morgen/Freitag/Woche/Datumsauswahl), Wiederholung `every:day|weekday|week|month|year` (beim Abhaken entsteht die nächste Aufgabe darunter), Benachrichtigungen (`src/lib/notifications.ts`): Tageszusammenfassung für fällige/überfällige Tasks mit deinem @Namen und Hinweis, wenn ein neuer Task mit deinem @Namen von außen (Agent, anderes Gerät) erscheint.
+- **Unterseiten** (`docs.parent_id`): Seitenmenü → Add subpage, im Baum einklappbar, Drag einer Seite auf eine andere verschachtelt sie. Löschen einer Elternseite hebt die Unterseiten eine Ebene hoch. **Der Datei-Spiegel auf der Platte bleibt flach** (die Beziehung lebt nur in der Datenbank/im lokalen Speicher). **Umbenennen** passt `[[Links]]` an, sobald der Titel verlassen wird (nicht bei doppelten Titeln).
+- **E-Mails**: `node scripts/email-templates.mjs build|preview|apply` — sechs Supabase-Vorlagen (Bestätigung, Passwort zurücksetzen mit Link **und** Code, Magic Link, Einladung, E-Mail-Wechsel, Re-Auth) im CoTenk-Look inkl. Dark Mode. `apply` braucht `SUPABASE_ACCESS_TOKEN`.
+- **Geprüft**: `tsc`, `eslint`, `vite build`, `cargo check`; Trigger-Regex per SQL getestet. **Nicht getestet**: alle UI-Abläufe (Export, Konto löschen, Verlauf, Anhänge, Unterseiten, Benachrichtigungen) und der Trigger gegen echte Seiten.
+
 ---
 
 ## 2. Positionierung und Product-Market-Fit
@@ -90,25 +125,29 @@ Stand: 24.09.2026. Dieses Dokument enthält drei Teile:
 - **„Für mich bauen lassen“ als bezahlter Service** (jemand oder ein Agent baut auf Anfrage eine Seite gegen Geld). Das lässt sich über Build with AI plus Paid Listings abbilden, das Geschäftsmodell ist aber offen.
 
 ### Agents
-- **Weitere ACP-Agents** (Claude Code über `claude-code-acp`, Gemini CLI, eigener Befehl). Dafür muss `acp_spawn` in Rust generalisiert werden (Befehl und Argumente statt fest `devin acp`), und Auth ist pro Agent anders. In Settings steht es als „Coming soon“; nimm das raus, falls du es nicht ankündigen willst.
-- **Freigabe statt Auto-Approve.** Aktuell werden alle Agent-Berechtigungen automatisch erteilt. Für Vertrauen (besonders in Teams) wäre ein Diff-Review sinnvoll: „Agent möchte 3 Blöcke ändern – ansehen, übernehmen, verwerfen.“
+- ~~**Weitere ACP-Agents**~~ → **umgesetzt (27.09.)**: Gemini CLI (`gemini --experimental-acp`) und ein frei konfigurierbarer ACP-Befehl („Custom“) laufen neben Claude Code und Devin. `acp_spawn` nimmt dafür einen optionalen Befehl entgegen. **Wieder entfernt (02.10.)**: Es gibt nur noch Claude Code und Devin CLI.
+- **Skills & MCP nur in CoTenk (02.10.)**: Settings → Skills & MCP. Skills (Markdown, Import von .md) und MCP-Server (Befehl oder URL) sind nur nutzbar, wenn die Agents in CoTenk laufen. Ohne CoTenk gestartetes `claude` oder `devin` kann sie nicht nutzen. Mit Login synct die Liste über Supabase (`agent_extensions`, Migration muss noch angewendet werden); Werte von Keys/Tokens bleiben auf dem Gerät.
+  - **Claude Code**: alles pro ACP-Session (Plugin für Skills, `mcpServers`).
+  - **Devin CLI** (3000.10.31) ignoriert MCP-Server aus `session/new`. Deshalb liegt im Workspace `.devin/mcp_config.local.json` mit einem Gateway (`cotenk --mcp-gateway`). Das Gateway liefert Skills und die MCP-Tools nur an Devin-Prozesse mit CoTenks Token. Ein normales `devin` im Workspace-Ordner sieht den Server, aber ohne Tools.
+  - Offen: OAuth-MCPs (Linear, Supabase …) brauchen bei Devin den Login über mcp-remote im Browser; Skills mit Zusatzdateien (Skripte) werden noch nicht unterstützt, nur reine SKILL.md.
+- ~~**Freigabe statt Auto-Approve.**~~ → **umgesetzt (27.09.)**: Edits und Befehle erscheinen als Block-Diff („Claude Code wants to change 3 blocks in …“) mit Allow / Allow for this chat / Reject. Lesen braucht keine Freigabe. Auto-Approve ist in Settings → Agents schaltbar; Standard ist „Review“.
 - **Agent-Präsenz im Dokument** (welchen Block der Agent gerade bearbeitet) und farbig markierte Agent-Änderungen.
 - **BYOK in der Web-Version** (Modell per API-Key, laut idee.txt „später“), damit Agents auch ohne Desktop-App laufen.
-- **Embeds mit gespeichertem Zustand.** Widgets wie Kanban oder Habit-Tracker verlieren ihren Zustand beim Neuladen. Idee: eine kleine, sichere postMessage-API (`cotenk.save(data)`), die Daten zurück ins Markdown schreibt. Das ist mächtig, braucht aber ein durchdachtes Sicherheitskonzept.
+- ~~**Embeds mit gespeichertem Zustand.**~~ → **umgesetzt (27.09.)**: `cotenk.save(data)` / `cotenk.state`. Der Zustand steht als `<script type="application/json" data-cotenk-state>` im Embed-Block selbst, synct also wie jede Änderung. Der Burndown auf der Welcome-Seite nutzt es.
 
 ### Workspace
-- **Lokaler Modus ohne Account** („Ausprobieren ohne Registrierung“, Speicherung im Browser, später migrieren). Das senkt die Einstiegshürde stark, widerspricht aber dem aktuellen Plan „Login per Supabase“.
-- **Obsidian-Vault oder Markdown-Ordner als Workspace importieren.** Starker Wedge, weil der Datei-Sync bereits fremde `.md`-Dateien übernimmt; es fehlt nur ein Import-Flow.
-- **Seiten verlinken** (`[[Seite]]`) mit Backlinks, verschachtelte Unterseiten und Ordner.
-- **Drag & Drop** für Seiten und Blöcke.
-- **Kanban-Ansicht für Tasks**, Datums-Picker, wiederkehrende Tasks, Benachrichtigungen bei `@mention`.
+- ~~**Lokaler Modus ohne Account**~~ → **umgesetzt (27.09.)**: Die App startet ohne Login direkt im Workspace. Seiten liegen im Browser-Cache (Desktop: zusätzlich im Workspace-Ordner), Agents laufen lokal ohne Account. Login kommt als Dialog erst, wenn er einen Grund hat (Sync, Publish, Community) – Sidebar-Footer, Rail, Settings → Account, Palette. Beim ersten Login werden lokale Seiten in den Account gemergt (unveränderte Seed-Seiten ausgenommen); Sign-out setzt das Gerät auf den Seed zurück. Die Welcome-Seite ist jetzt ein interaktiver Spielplatz (animiertes Live-Dashboard, Burndown mit Scope-Regler als Agent-Beispiel) und über Ctrl K → „Open the welcome page“ jederzeit wiederherstellbar.
+- ~~**Obsidian-Vault oder Markdown-Ordner importieren.**~~ → **umgesetzt (27.09.)**: Import-Dialog und Drop-Zone (Fenster-weit) für Notion-Export (.zip, auch verschachtelt; Hash-Suffixe, Links → `[[…]]`, `<aside>` → Callout, CSV-Datenbanken → Tabelle), Obsidian-Vault (Ordner wählen oder droppen; Frontmatter-Tags, `![[…]]`) und lose .md/.txt/.csv. Bilder bis 512 KB kommen inline mit. Danach: „Summarize with agent“.
+- ~~**Seiten verlinken** (`[[Seite]]`) mit Backlinks~~ → **umgesetzt (27.09.)**: `[[Titel]]`, `[[Titel|Label]]`, fehlende Seiten werden per Klick angelegt, „Linked from“ unter jeder Seite. Offen: verschachtelte Unterseiten, Umbenennen aktualisiert Links noch nicht.
+- ~~**Drag & Drop** für Seiten~~ → **umgesetzt (27.09.)**: Seiten in Ordner ziehen bzw. auf „Documents“ (Root). Offen: Reihenfolge innerhalb eines Ordners und Blöcke.
+- ~~**Kanban-Ansicht für Tasks**~~ → **umgesetzt (27.09.)**: Tasks → Board (Spalten nach Fälligkeit plus Done; Karte ziehen setzt `due:` bzw. hakt ab). Offen:, Datums-Picker, wiederkehrende Tasks, Benachrichtigungen bei `@mention`.
 - **Teilen per öffentlichem Link** (read-only), später Teams und Rollen. Mehrere Menschen im selben Dokument waren laut idee.txt bewusst erst mal ausgelassen.
 - **Deutsche UI / i18n.** Die UI ist jetzt einheitlich Englisch (vorher gemischt). Falls die erste Zielgruppe deutschsprachig ist, lohnt sich i18n früh.
 
 ### Technik
-- **Bundle-Größe** ~1 MB (Warnung von Vite). Code-Splitting für Marketplace und Agents würde den Start beschleunigen.
-- **Supabase-Sync** lädt nur beim Login. Realtime-Subscriptions würden Änderungen von anderen Geräten sofort zeigen; der Editor kann sie dank Live-Follow schon übernehmen.
-- **Produkt-Analytics** (datenschutzfreundlich, z. B. PostHog EU), um die Aktivierungsmetrik tatsächlich zu messen.
+- ~~**Bundle-Größe**~~ → **umgesetzt (27.09.)**: Views, Publish-Dialog und Importer laden lazy, Vendor-Chunks (react, supabase, markdown, motion) separat. Haupt-Chunk 1,21 MB → 361 kB, keine Vite-Warnung mehr.
+- ~~**Supabase-Sync** lädt nur beim Login.~~ → **umgesetzt (27.09.)**: Realtime-Abo auf docs/folders plus Re-Pull bei Fensterfokus (Fallback), neuere `updatedAt` gewinnt. Braucht `20260927_realtime.sql`. Alter Text: Realtime-Subscriptions würden Änderungen von anderen Geräten sofort zeigen; der Editor kann sie dank Live-Follow schon übernehmen.
+- ~~**Produkt-Analytics**~~ → **umgesetzt (27.09.)**: PostHog EU ohne SDK (`src/lib/analytics.ts`), aktiv nur mit `VITE_POSTHOG_KEY`, Opt-out in Settings → About, respektiert Do-Not-Track. Events: `app_opened`, `agent_page_changed` (`first`, `session_index`), `signed_in` (`minutes_since_first_open`), `import_completed`, `agent_turn_completed`, `agent_permission`, `template_installed`, `page_published`, `page_cta`. Offen (rechtlich): ob die Web-Version ein Consent-Banner braucht.
 
 ### Preis-Idee für CoTenk selbst (nur Vorschlag)
 - **Free**: solo, unbegrenzte Seiten, eigener Agent (BYO).

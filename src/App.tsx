@@ -1,18 +1,51 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { useWorkspace } from "@/lib/store";
+import { startNotifications } from "@/lib/notifications";
 import { AuthGate } from "@/components/auth/auth-gate";
 import { IconRail } from "@/components/shell/icon-rail";
 import { Sidebar } from "@/components/shell/sidebar";
 import { CommandPalette } from "@/components/shell/command-palette";
 import { DocEditor } from "@/components/editor/doc-editor";
-import { HomeView } from "@/components/home/home-view";
-import { TasksView } from "@/components/tasks/tasks-view";
-import { SettingsView } from "@/components/settings/settings-view";
-import { AgentsView } from "@/components/agents/agents-view";
 import { AgentActivity } from "@/components/agents/agent-activity";
-import { MarketView } from "@/components/market/market-view";
-import { PublishDialog } from "@/components/market/publish-dialog";
 import { Toaster } from "@/components/ui/toaster";
+import { lazyView, ViewBoundary } from "@/components/ui/view-boundary";
+import { ImportLayer } from "@/components/import/import-layer";
+import { PermissionDialog } from "@/components/agents/permission-dialog";
+import { AgentSetupGuide } from "@/components/agents/agent-setup-guide";
+
+// Views other than the editor load on first visit (code-split). A chunk
+// that fails to load is retried and the view is fenced by an error
+// boundary, so a failure never blanks the whole window.
+const HomeView = lazyView(() =>
+  import("@/components/home/home-view").then((m) => m.HomeView),
+);
+const TasksView = lazyView(() =>
+  import("@/components/tasks/tasks-view").then((m) => m.TasksView),
+);
+const SettingsView = lazyView(() =>
+  import("@/components/settings/settings-view").then((m) => m.SettingsView),
+);
+const AgentsView = lazyView(() =>
+  import("@/components/agents/agents-view").then((m) => m.AgentsView),
+);
+const MarketView = lazyView(() =>
+  import("@/components/market/market-view").then((m) => m.MarketView),
+);
+const HistoryDialog = lazy(() =>
+  import("@/components/shell/history-dialog").then((m) => ({
+    default: m.HistoryDialog,
+  })),
+);
+const PublishDialog = lazy(() =>
+  import("@/components/market/publish-dialog").then((m) => ({
+    default: m.PublishDialog,
+  })),
+);
+
+/** Blank canvas while a view's chunk loads (usually a few ms). */
+function ViewFallback() {
+  return <div className="h-dvh min-w-0 flex-1 bg-canvas" />;
+}
 
 /** App-wide shortcuts: Ctrl/⌘+K search, Ctrl/⌘+\ sidebar. */
 function useGlobalShortcuts() {
@@ -40,30 +73,58 @@ export default function App() {
     (s) => s.docs.find((d) => d.id === s.publishDocId) ?? null,
   );
   const setPublishDocId = useWorkspace((s) => s.setPublishDocId);
+  const setRailSection = useWorkspace((s) => s.setRailSection);
+  const historyDocId = useWorkspace((s) => s.historyDocId);
+  const setHistoryDocId = useWorkspace((s) => s.setHistoryDocId);
+  const goHome = () => setRailSection("docs");
   useGlobalShortcuts();
+  useEffect(() => startNotifications(), []);
 
   return (
     <AuthGate>
-      <div className="flex h-dvh overflow-hidden bg-canvas text-ink">
-        <IconRail />
-        <Sidebar />
-        {railSection === "home" ? (
-          <HomeView />
-        ) : railSection === "tasks" ? (
-          <TasksView />
-        ) : railSection === "settings" ? (
-          <SettingsView />
-        ) : railSection === "agents" ? (
-          <AgentsView />
-        ) : railSection === "market" ? (
-          <MarketView />
-        ) : (
-          <DocEditor />
-        )}
-      </div>
+      <ViewBoundary onHome={goHome}>
+        <div className="flex h-dvh overflow-hidden bg-canvas text-ink">
+          <IconRail />
+          <Sidebar />
+          {/* keyed per view: switching views resets a crashed one */}
+          <ViewBoundary key={railSection} onHome={goHome}>
+            <Suspense fallback={<ViewFallback />}>
+              {railSection === "home" ? (
+                <HomeView />
+              ) : railSection === "tasks" ? (
+                <TasksView />
+              ) : railSection === "settings" ? (
+                <SettingsView />
+              ) : railSection === "agents" ? (
+                <AgentsView />
+              ) : railSection === "market" ? (
+                <MarketView />
+              ) : (
+                <DocEditor />
+              )}
+            </Suspense>
+          </ViewBoundary>
+        </div>
+      </ViewBoundary>
       <CommandPalette />
-      <PublishDialog doc={publishDoc} onClose={() => setPublishDocId(null)} />
+      {publishDoc && (
+        <Suspense fallback={null}>
+          <PublishDialog doc={publishDoc} onClose={() => setPublishDocId(null)} />
+        </Suspense>
+      )}
+      {historyDocId && (
+        <Suspense fallback={null}>
+          <HistoryDialog
+            key={historyDocId}
+            docId={historyDocId}
+            onClose={() => setHistoryDocId(null)}
+          />
+        </Suspense>
+      )}
       <AgentActivity />
+      <ImportLayer />
+      <PermissionDialog />
+      <AgentSetupGuide />
       <Toaster />
     </AuthGate>
   );

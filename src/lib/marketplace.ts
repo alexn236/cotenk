@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { getSupabase } from "./supabase";
 import { useAuth } from "./auth-store";
+import { track } from "./analytics";
+import { newId } from "./ids";
 import type { TemplateCategory } from "./templates";
 
 /** A page someone published to the community marketplace. */
@@ -43,10 +45,6 @@ const toListing = (r: ListingRow): Listing => ({
   createdAt: Date.parse(r.created_at) || 0,
 });
 
-/** "anna.k@x.io" → "anna.k" — a readable default author name. */
-export function authorFromEmail(email: string): string {
-  return email.split("@")[0] || "Anonymous";
-}
 
 export type MarketCategory = TemplateCategory | "All";
 
@@ -60,17 +58,20 @@ type MarketState = {
   loaded: boolean;
   fetch: () => Promise<void>;
   publish: (input: {
+    /** Display name shown on the listing (never the email). */
+    author: string;
     title: string;
     description: string;
     category: TemplateCategory;
     content: string;
   }) => Promise<string | null>;
   unpublish: (id: string) => Promise<string | null>;
+  /** Forgets loaded listings so the next view refetches (auth change). */
+  reset: () => void;
   /** Fire-and-forget install counter. */
   countInstall: (id: string) => void;
 };
 
-let idSeq = 0;
 
 export const useMarket = create<MarketState>((set, get) => ({
   category: "All",
@@ -82,8 +83,21 @@ export const useMarket = create<MarketState>((set, get) => ({
 
   fetch: async () => {
     if (get().loading) return;
+    // Listings are public (migration 20260927_marketplace_public_read);
+    // signing in is only needed to publish.
+    let sb;
+    try {
+      sb = getSupabase();
+    } catch {
+      set({
+        listings: [],
+        loaded: true,
+        error: "Community pages need a connection to the CoTenk service.",
+      });
+      return;
+    }
     set({ loading: true });
-    const { data, error } = await getSupabase()
+    const { data, error } = await sb
       .from("marketplace_listings")
       .select(
         "id, user_id, author, title, description, category, content, price_cents, installs, created_at",
@@ -91,11 +105,13 @@ export const useMarket = create<MarketState>((set, get) => ({
       .order("created_at", { ascending: false })
       .limit(200);
     if (error) {
+      const signedOut = !useAuth.getState().user;
       set({
         loading: false,
         loaded: true,
-        error:
-          "Community listings are unavailable. Apply the marketplace migration in Supabase to enable publishing.",
+        error: signedOut
+          ? "Sign in to browse community pages and publish your own."
+          : "Community listings are unavailable. Apply the marketplace migration in Supabase to enable publishing.",
       });
       return;
     }
@@ -107,16 +123,17 @@ export const useMarket = create<MarketState>((set, get) => ({
     });
   },
 
-  publish: async ({ title, description, category, content }) => {
+  publish: async ({ author, title, description, category, content }) => {
     const user = useAuth.getState().user;
     if (!user) return "Sign in to publish.";
-    const id = `lst-${Date.now().toString(36)}-${(idSeq++).toString(36)}`;
+    if (!author.trim()) return "Add the name to publish under.";
+    const id = newId();
     const { error } = await getSupabase()
       .from("marketplace_listings")
       .insert({
         id,
         user_id: user.id,
-        author: authorFromEmail(user.email),
+        author: author.trim().slice(0, 60),
         title,
         description,
         category,
@@ -124,6 +141,7 @@ export const useMarket = create<MarketState>((set, get) => ({
         price_cents: 0,
       });
     if (error) return error.message;
+    track("page_published", { category });
     await get().fetch();
     return null;
   },
@@ -137,6 +155,8 @@ export const useMarket = create<MarketState>((set, get) => ({
     set((s) => ({ listings: s.listings.filter((l) => l.id !== id) }));
     return null;
   },
+
+  reset: () => set({ listings: [], loaded: false, error: null }),
 
   countInstall: (id) => {
     set((s) => ({

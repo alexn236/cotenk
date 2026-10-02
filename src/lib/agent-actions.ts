@@ -2,7 +2,12 @@ import { useAgent } from "./agent-store";
 import type { AgentKind } from "./agents";
 import { useWorkspace } from "./store";
 import { toast } from "./toast";
-import { DESKTOP_ONLY_MESSAGE, isDesktop } from "./workspace";
+import {
+  DESKTOP_DOWNLOAD_URL,
+  DESKTOP_ONLY_MESSAGE,
+  isDesktop,
+  openExternal,
+} from "./workspace";
 
 /**
  * Hands work from anywhere in the workspace (a page, a task, the
@@ -25,7 +30,13 @@ export function askAgent({
   stay?: boolean;
 }) {
   if (!isDesktop()) {
-    toast(DESKTOP_ONLY_MESSAGE, { tone: "error" });
+    toast(DESKTOP_ONLY_MESSAGE, {
+      tone: "error",
+      action: {
+        label: "Get the app",
+        run: () => openExternal(DESKTOP_DOWNLOAD_URL),
+      },
+    });
     return;
   }
   const agent = useAgent.getState();

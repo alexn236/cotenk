@@ -3,6 +3,8 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useWorkspace } from "./store";
 import { isDesktop, resolveWorkspaceDir } from "./workspace";
 import type { Doc, Folder } from "./types";
+import { noteDiskChange } from "./analytics";
+import { newId } from "./ids";
 
 /**
  * Workspace folder sync: mirrors docs/folders into a local directory as
@@ -65,6 +67,11 @@ export function docRelativePath(doc: Doc, folders: Folder[]): string {
     : undefined;
   const dir = folder ? `${slug(folder.name)}/` : "";
   return `${dir}${slug(doc.title)}.md`;
+}
+
+/** Workspace-relative directory of a folder, e.g. "q3-plans/". */
+export function folderRelativePath(folder: Folder): string {
+  return `${slug(folder.name)}/`;
 }
 
 /**
@@ -188,18 +195,36 @@ let timer: ReturnType<typeof setTimeout> | null = null;
  * are simply (re)written instead of wiping the workspace.
  */
 let knownFileIds = new Set<string>();
+/**
+ * Bumped when a folder session starts or ends (sign-in/out switches the
+ * workspace and its folder). A reconcile that started in another session
+ * stops before touching the store or the disk — otherwise it would
+ * compare the new workspace against the old folder and delete files
+ * there that "vanished from the store".
+ */
+let session = 0;
+/**
+ * The session whose folder is live (its first reconcile has started).
+ * While a signed-in workspace waits for its first pull the store is
+ * empty — a stray reconcile then would delete every file in the folder.
+ */
+let liveSession = -1;
 
 async function reconcile() {
+  if (liveSession !== session) return;
   if (running) {
     queued = true;
     return;
   }
   running = true;
+  const mine = session;
+  const stale = () => mine !== session;
   try {
     /** Docs adopted this pass → write frontmatter onto their own path. */
     const adoptedThisPass = new Map<string, string>();
     const root = normPath(await resolveWorkspaceDir());
     const files = await scan(root);
+    if (stale()) return;
     const byId = new Map<string, Scanned>();
     for (const f of files) if (f.id) byId.set(f.id, f);
 
@@ -223,7 +248,7 @@ async function reconcile() {
           folderIdByName.get(name.toLowerCase()) ??
           folders.find((x) => slug(x.name) === slug(name))?.id;
         if (existing) return existing;
-        const f: Folder = { id: `fld-${Date.now().toString(36)}-${folders.length}`, name };
+        const f: Folder = { id: newId(), name };
         folders = [...folders, f];
         folderIdByName.set(name.toLowerCase(), f.id);
         foldersById.set(f.id, f);
@@ -282,7 +307,7 @@ async function reconcile() {
             parentDir.replace(/\\/g, "/") !== root.replace(/\\/g, "/");
           const dirName = inSubdir ? parentDir.split(/[\\/]/).pop() : null;
           const doc2: Doc = {
-            id: `doc-${Date.now().toString(36)}-${adoptedPaths.size}`,
+            id: newId(),
             folderId: folderFor(dirName ?? null),
             title: h1 || stem,
             content: lead ? f.content.slice(lead[0].length) : f.content,
@@ -295,7 +320,10 @@ async function reconcile() {
         }
       }
       adoptedPaths.forEach((p, id) => adoptedThisPass.set(id, p));
-      if (changed) useWorkspace.setState({ docs, folders });
+      if (changed) {
+        useWorkspace.setState({ docs, folders });
+        noteDiskChange();
+      }
     }
 
     // ---- pass 2: store → disk ----
@@ -344,10 +372,14 @@ async function reconcile() {
           removals.push(f.path);
         }
       }
-      for (const [p, c] of writes) await invoke("fs_write", { path: p, contents: c });
+      for (const [p, c] of writes) {
+        if (stale()) return;
+        await invoke("fs_write", { path: p, contents: c });
+      }
       // Never delete a file this pass just wrote (same file, other spelling).
       const written = new Set(writes.map(([p]) => pathKey(p)));
       for (const p of removals) {
+        if (stale()) return;
         if (!written.has(pathKey(p))) await invoke("fs_remove", { path: p });
       }
       // After this pass every store doc has a file on disk — remember
@@ -372,13 +404,22 @@ function schedule() {
 }
 
 /**
- * Starts folder sync for the session: waits until the Supabase pull has
- * landed (syncStatus reaches synced/error), merges once, then watches
- * the folder. Returns a dispose function.
+ * Starts folder sync for the session, merges once, then watches the
+ * folder. Signed in (`afterPull`), it waits until the Supabase pull has
+ * landed successfully — starting on a failed pull (offline launch) used
+ * to reconcile the folder against the seed workspace and delete every
+ * account page from disk. Returns a dispose function.
  */
-export function initFileSync(): () => void {
+export function initFileSync({
+  afterPull = false,
+}: { afterPull?: boolean } = {}): () => void {
   // The web build has no local folder — Supabase is the only store.
   if (!isDesktop()) return () => {};
+  // New folder session: file ids seen in the previous one (another
+  // workspace, another folder) mean nothing here.
+  session += 1;
+  const mySession = session;
+  knownFileIds = new Set();
   let disposed = false;
   let unlisten: UnlistenFn | null = null;
   let unsubStore: (() => void) | null = null;
@@ -387,24 +428,33 @@ export function initFileSync(): () => void {
   const start = async () => {
     if (disposed) return;
     const root = await resolveWorkspaceDir();
+    if (disposed) return;
+    liveSession = mySession;
     await reconcile();
+    if (disposed) return;
     try {
       await invoke("fs_watch", { root });
-      unlisten = await listen<string[]>("ws:fs", () => schedule());
+      const off = await listen<string[]>("ws:fs", () => schedule());
+      // Disposed while the listener was being attached.
+      if (disposed) {
+        off();
+        return;
+      }
+      unlisten = off;
     } catch {
       /* watcher unavailable — still sync on store changes */
     }
+    if (disposed) return;
     unsubStore = useWorkspace.subscribe((s, prev) => {
       if (s.docs !== prev.docs || s.folders !== prev.folders) schedule();
     });
   };
 
-  const status = useWorkspace.getState().syncStatus;
-  if (status === "synced" || status === "error" || status === "idle") {
+  if (!afterPull) {
     void start();
   } else {
     unsubGate = useWorkspace.subscribe((s) => {
-      if (s.syncStatus === "synced" || s.syncStatus === "error") {
+      if (s.syncStatus === "synced") {
         unsubGate?.();
         unsubGate = null;
         void start();
@@ -414,6 +464,7 @@ export function initFileSync(): () => void {
 
   return () => {
     disposed = true;
+    session += 1;
     if (timer) clearTimeout(timer);
     unlisten?.();
     unsubStore?.();

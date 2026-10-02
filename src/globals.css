@@ -212,6 +212,40 @@ kbd {
 .prose-doc a:hover {
   text-decoration-color: var(--color-accent);
 }
+/* [[wikilinks]] — dotted until hovered, dim when the page doesn't exist */
+.prose-doc a.wikilink {
+  color: var(--color-accent-2);
+  text-decoration-style: dotted;
+}
+.prose-doc a.wikilink[data-missing] {
+  color: var(--color-ink-3);
+  text-decoration-color: var(--color-line);
+}
+.prose-doc img {
+  max-width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--color-line-soft);
+}
+.prose-doc .doc-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 150ms var(--ease-out-expo), transform 150ms var(--ease-out-expo);
+}
+.prose-doc .doc-cta:hover {
+  background: var(--color-accent-2);
+}
+.prose-doc .doc-cta:active {
+  transform: scale(0.98);
+}
 
 .prose-doc ul,
 .prose-doc ol {

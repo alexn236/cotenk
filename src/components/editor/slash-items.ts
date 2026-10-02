@@ -3,11 +3,13 @@ import {
   CheckSquare,
   Code,
   FileHtml,
+  Image as ImageIcon,
   Lightbulb,
   Lightning,
   ListBullets,
   ListNumbers,
   Minus,
+  Paperclip,
   Quotes,
   Table,
   TextHOne,
@@ -29,7 +31,7 @@ export type SlashItem = {
   /** Initial block text (tables, callouts, embed starters). */
   preset?: string;
   /** Non-block action handled by the editor instead of a type switch. */
-  action?: "ask-agent";
+  action?: "ask-agent" | "image" | "file";
   group: "Basic" | "Embeds" | "Agent";
 };
 
@@ -132,6 +134,26 @@ export const SLASH_ITEMS: SlashItem[] = [
     keywords: ["table", "tabelle", "grid", "rows"],
     icon: Table,
     preset: "| Name | Status | Owner |\n| --- | --- | --- |\n| First item | In progress | @you |",
+    group: "Basic",
+  },
+  {
+    id: "image",
+    type: "paragraph",
+    label: "Image",
+    desc: "Upload a picture (or paste / drop one)",
+    keywords: ["image", "bild", "foto", "photo", "picture", "screenshot", "upload"],
+    icon: ImageIcon,
+    action: "image",
+    group: "Basic",
+  },
+  {
+    id: "file",
+    type: "paragraph",
+    label: "File",
+    desc: "Attach a PDF, document or any file",
+    keywords: ["file", "datei", "attachment", "anhang", "pdf", "upload", "document"],
+    icon: Paperclip,
+    action: "file",
     group: "Basic",
   },
   {

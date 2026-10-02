@@ -1,10 +1,23 @@
 import { createContext, isValidElement, useContext } from "react";
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import type { Components, ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ArrowRight } from "@phosphor-icons/react";
 import { slugify } from "@/lib/headings";
 import { dueBucket, formatDue, isAgentName, isoDay } from "@/lib/tasks";
+import { useWorkspace } from "@/lib/store";
+import { useAgentSetup } from "@/lib/agent-setup";
+import { fileDownloadUrl, FILE_REF, IMAGE_REF, useImageSrc } from "@/lib/images";
+import { toast } from "@/lib/toast";
+import { track } from "@/lib/analytics";
+import {
+  findDocByTitle,
+  linkifyWikilinks,
+  PAGE_HREF,
+  titleKey,
+} from "@/lib/wikilinks";
+import { DESKTOP_DOWNLOAD_URL, isDesktop, openExternal } from "@/lib/workspace";
 
 /**
  * Called when a rendered task-list checkbox is toggled.
@@ -107,6 +120,14 @@ function InlineCode({
           : "border-line text-ink-2";
     return <span className={`${CHIP} ${tone}`}>{formatDue(due, today)}</span>;
   }
+  const every = text && /^every:(day|weekday|week|month|year)$/.exec(text)?.[1];
+  if (every) {
+    return (
+      <span className={`${CHIP} border-line text-ink-2`} title="Repeats">
+        ↻ {every === "weekday" ? "weekdays" : `${every}ly`.replace("dayly", "daily")}
+      </span>
+    );
+  }
   const who = text && /^@([\p{L}\p{N}_.-]+)$/u.exec(text)?.[1];
   if (who) {
     const agent = isAgentName(who);
@@ -126,12 +147,163 @@ function InlineCode({
   return <code {...props}>{children}</code>;
 }
 
+/** Keeps app links (`cotenk:…`) and inline images (imports) intact. */
+function urlTransform(url: string): string {
+  if (
+    url.startsWith("cotenk:") ||
+    url.startsWith(IMAGE_REF) ||
+    url.startsWith(FILE_REF)
+  ) {
+    return url;
+  }
+  if (/^data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,/i.test(url)) return url;
+  return defaultUrlTransform(url);
+}
+
+/** `[[Page]]` link: opens the page, or creates it when it doesn't exist. */
+function PageLink({ title, children }: { title: string; children: ReactNode }) {
+  const exists = useWorkspace((s) =>
+    s.docs.some((d) => titleKey(d.title || "Untitled") === titleKey(title)),
+  );
+  return (
+    <a
+      href="#"
+      className="wikilink"
+      data-missing={exists ? undefined : ""}
+      title={exists ? title : `Create “${title}”`}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const st = useWorkspace.getState();
+        const doc = findDocByTitle(st.docs, title);
+        if (doc) st.setActiveDoc(doc.id);
+        else st.createDocWith({ title, content: "" });
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
+/**
+ * In-page calls to action (`cotenk:connect-agent`, `cotenk:import`).
+ * The agent CTA turns into a download link on the web, where agents
+ * can't run.
+ */
+function ActionLink({ action, children }: { action: string; children: ReactNode }) {
+  const web = action === "connect-agent" && !isDesktop();
+  const run = () => {
+    const ws = useWorkspace.getState();
+    track("page_cta", { action, web });
+    if (action === "import") ws.setImportOpen(true);
+    else if (action === "connect-agent") {
+      if (web) openExternal(DESKTOP_DOWNLOAD_URL);
+      else useAgentSetup.getState().openGuide();
+    }
+  };
+  return (
+    <button type="button" className="doc-cta" onClick={run}>
+      {web ? "Get the desktop app — agents run there" : children}
+      <ArrowRight size={12} weight="bold" />
+    </button>
+  );
+}
+
+function Link({
+  node,
+  href,
+  children,
+  ...props
+}: ComponentPropsWithoutRef<"a"> & ExtraProps) {
+  void node;
+  if (href?.startsWith(PAGE_HREF)) {
+    let title = href.slice(PAGE_HREF.length);
+    try {
+      title = decodeURIComponent(title);
+    } catch {
+      /* keep raw */
+    }
+    return <PageLink title={title}>{children}</PageLink>;
+  }
+  if (href?.startsWith(FILE_REF)) {
+    const path = href.slice(FILE_REF.length).split("#")[0];
+    return (
+      <a
+        href="#"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          fileDownloadUrl(path, nodeToText(children) || "file").then(
+            openExternal,
+            (err) => toast(err instanceof Error ? err.message : String(err), { tone: "error" }),
+          );
+        }}
+      >
+        {children}
+      </a>
+    );
+  }
+  if (href?.startsWith("cotenk:")) {
+    return <ActionLink action={href.slice(7)}>{children}</ActionLink>;
+  }
+  const external = !!href && /^(https?:|mailto:)/i.test(href);
+  return (
+    <a
+      {...props}
+      href={href}
+      rel={external ? "noreferrer" : undefined}
+      onClick={
+        external
+          ? (e) => {
+              // Never navigate the app itself away from the workspace.
+              e.preventDefault();
+              e.stopPropagation();
+              openExternal(href);
+            }
+          : undefined
+      }
+    >
+      {children}
+    </a>
+  );
+}
+
+/** Images: `cotenk-image:` references are fetched from the account's storage. */
+function Img({
+  node,
+  src,
+  alt,
+  ...props
+}: ComponentPropsWithoutRef<"img"> & ExtraProps) {
+  void node;
+  const url = useImageSrc(typeof src === "string" ? src : undefined);
+  if (!url) {
+    return (
+      <span className="inline-block rounded-[8px] border border-line-soft bg-panel-2 px-3 py-6 text-[12px] text-ink-3">
+        {src?.startsWith(IMAGE_REF) ? "Image unavailable" : (alt ?? "Image")}
+      </span>
+    );
+  }
+  const width = /#w=(\d+)/.exec(src ?? "")?.[1];
+  return (
+    <img
+      {...props}
+      src={url}
+      alt={alt ?? ""}
+      loading="lazy"
+      style={width ? { width: `min(100%, ${width}px)` } : undefined}
+    />
+  );
+}
+
 const components: Components = {
+  img: Img,
   h1: makeHeading("h1"),
   h2: makeHeading("h2"),
   h3: makeHeading("h3"),
   input: CheckboxInput,
   code: InlineCode,
+  a: Link,
 };
 
 export type MarkdownProps = {
@@ -149,8 +321,12 @@ export function Markdown({ children, onToggleTask }: MarkdownProps) {
   return (
     <TaskToggleContext.Provider value={onToggleTask ?? null}>
       <div className="prose-doc">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-          {children}
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={components}
+          urlTransform={urlTransform}
+        >
+          {linkifyWikilinks(children)}
         </ReactMarkdown>
       </div>
     </TaskToggleContext.Provider>

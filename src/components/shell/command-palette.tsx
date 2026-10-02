@@ -2,19 +2,23 @@ import { useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import {
   CheckSquare,
+  DownloadSimple,
   FileText,
   FolderPlus,
   GearSix,
+  Hand,
   House,
   Lightning,
   MagnifyingGlass,
   MoonStars,
   Plus,
+  SignIn,
   Sparkle,
   Storefront,
   type Icon,
 } from "@phosphor-icons/react";
-import { useWorkspace } from "@/lib/store";
+import { openWelcomePage, useWorkspace } from "@/lib/store";
+import { requestSignIn, useAuth } from "@/lib/auth-store";
 import type { Doc, Folder } from "@/lib/types";
 import { askAgent } from "@/lib/agent-actions";
 import { useIsomorphicLayoutEffect } from "@/components/editor/utils";
@@ -33,6 +37,7 @@ type Item = {
 /** Plain-text snippet around the first match of `q` in `content`. */
 function snippet(content: string, q: string): string | undefined {
   const flat = content
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/[#>*_`~[\]()|-]+/g, " ")
     .replace(/\s+/g, " ");
@@ -117,6 +122,14 @@ function buildItems(
       }),
     },
     {
+      id: "import",
+      group: "Actions",
+      label: "Import notes",
+      hint: "Notion export, Obsidian vault, .md files",
+      icon: DownloadSimple,
+      run: go(() => ws.setImportOpen(true)),
+    },
+    {
       id: "templates",
       group: "Actions",
       label: "Browse templates",
@@ -171,6 +184,30 @@ function buildItems(
       icon: MoonStars,
       run: go(() => ws.toggleTheme()),
     },
+    {
+      id: "welcome",
+      group: "Actions",
+      label: "Open the welcome page",
+      hint: "Live chart, agent example, 60-second tour",
+      icon: Hand,
+      run: go(openWelcomePage),
+    },
+    ...(useAuth.getState().status === "signedOut"
+      ? [
+          {
+            id: "sign-in",
+            group: "Actions" as const,
+            label: "Sign in",
+            hint: "Sync across devices, publish to the marketplace",
+            icon: SignIn,
+            run: go(() =>
+              requestSignIn(
+                "Sign in to open this workspace on your other devices.",
+              ),
+            ),
+          },
+        ]
+      : []),
   ];
   const actions = allActions.filter(
     (a) => !q || a.label.toLowerCase().includes(q),

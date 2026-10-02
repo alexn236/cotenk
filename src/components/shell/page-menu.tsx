@@ -2,9 +2,12 @@ import { useState } from "react";
 import {
   CaretLeft,
   CaretRight,
+  ArrowLineUp,
   Check,
+  ClockCounterClockwise,
   Copy,
   CopySimple,
+  FilePlus,
   FolderSimple,
   Lightning,
   PushPin,
@@ -18,7 +21,7 @@ import { toast } from "@/lib/toast";
 import type { Doc } from "@/lib/types";
 
 /** Approximate height, used by callers to flip menus near the bottom. */
-export const PAGE_MENU_HEIGHT = 236;
+export const PAGE_MENU_HEIGHT = 310;
 
 const ITEM =
   "flex h-7 w-full items-center gap-2 rounded-[6px] px-2 text-left text-[12.5px] text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink";
@@ -69,6 +72,9 @@ export function PageMenuItems({
   const moveDoc = useWorkspace((s) => s.moveDoc);
   const duplicateDoc = useWorkspace((s) => s.duplicateDoc);
   const setPublishDocId = useWorkspace((s) => s.setPublishDocId);
+  const createSubpage = useWorkspace((s) => s.createSubpage);
+  const setParent = useWorkspace((s) => s.setParent);
+  const setHistoryDocId = useWorkspace((s) => s.setHistoryDocId);
   const [moving, setMoving] = useState(false);
 
   const done = (fn: () => void) => () => {
@@ -132,6 +138,18 @@ export function PageMenuItems({
         onClick={done(() => togglePin(doc.id))}
       />
       <MenuButton
+        icon={FilePlus}
+        label="Add subpage"
+        onClick={done(() => createSubpage(doc.id))}
+      />
+      {doc.parentId && (
+        <MenuButton
+          icon={ArrowLineUp}
+          label="Move out of parent"
+          onClick={done(() => setParent(doc.id, null))}
+        />
+      )}
+      <MenuButton
         icon={FolderSimple}
         label="Move to…"
         onClick={() => setMoving(true)}
@@ -152,6 +170,11 @@ export function PageMenuItems({
             () => toast("Clipboard unavailable", { tone: "error" }),
           );
         })}
+      />
+      <MenuButton
+        icon={ClockCounterClockwise}
+        label="Version history"
+        onClick={done(() => setHistoryDocId(doc.id))}
       />
       <MenuButton
         icon={UploadSimple}

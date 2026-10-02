@@ -43,7 +43,7 @@ export function AgentSwitch({
     <div
       role="radiogroup"
       aria-label="Agent"
-      className="flex gap-0.5 rounded-[8px] border border-line-soft bg-panel-2 p-0.5"
+      className="grid grid-cols-2 gap-0.5 rounded-[8px] border border-line-soft bg-panel-2 p-0.5"
     >
       {AGENT_KINDS.map((k) => {
         const active = k === value;

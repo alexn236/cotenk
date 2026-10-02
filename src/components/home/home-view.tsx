@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import {
   ArrowRight,
@@ -14,12 +14,22 @@ import {
   X,
   type Icon,
 } from "@phosphor-icons/react";
-import { useWorkspace } from "@/lib/store";
-import { useAuth } from "@/lib/auth-store";
+import { openWelcomePage, useWorkspace } from "@/lib/store";
+import { requestSignIn, useAuth } from "@/lib/auth-store";
 import { useAgent } from "@/lib/agent-store";
-import { authorFromEmail } from "@/lib/marketplace";
+import { useAgentSetup } from "@/lib/agent-setup";
+import { AGENT_KINDS } from "@/lib/agents";
 import { TEMPLATES } from "@/lib/templates";
 import { seedDocs } from "@/lib/mock-docs";
+import { WELCOME_ID } from "@/lib/welcome";
+import { hasAgentChangedPage } from "@/lib/analytics";
+import {
+  completeOnboarding,
+  dismissOnboarding,
+  onboardingComplete,
+  onboardingDismissed,
+} from "@/lib/onboarding";
+import { DESKTOP_DOWNLOAD_URL, isDesktop, openExternal } from "@/lib/workspace";
 import { dueBucket, extractTasks, isoDay } from "@/lib/tasks";
 import { relativeTime } from "@/lib/time";
 import type { Doc } from "@/lib/types";
@@ -27,7 +37,6 @@ import { TaskRow } from "@/components/tasks/task-row";
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 const stagger = (i: number) => Math.min(i * 0.04, 0.3);
-const ONBOARDING_KEY = "cotenk-onboarding-dismissed";
 
 /** First non-heading text line of a doc, stripped of markdown marks. */
 function docPreview(content: string): string {
@@ -59,10 +68,9 @@ function greeting(now: Date): string {
   return "Good evening";
 }
 
-/** "anna.k" → "Anna" */
-function firstName(email: string): string {
-  const base = authorFromEmail(email).split(/[._-]/)[0] ?? "";
-  return base ? base[0].toUpperCase() + base.slice(1) : "there";
+/** "Anna Kowalski" → "Anna" — the display name, never the email. */
+function firstName(displayName: string): string {
+  return displayName.trim().split(/\s+/)[0] ?? "";
 }
 
 const SECTION_LABEL =
@@ -80,7 +88,7 @@ export function HomeView() {
   const setMarketTab = useWorkspace((s) => s.setMarketTab);
   const setPaletteOpen = useWorkspace((s) => s.setPaletteOpen);
   const createDoc = useWorkspace((s) => s.createDoc);
-  const email = useAuth((s) => s.user?.email ?? "");
+  const name = firstName(useAuth((s) => s.displayName));
   const chats = useAgent((s) => s.chats);
   const selectChat = useAgent((s) => s.selectChat);
   const reduceMotion = useReducedMotion();
@@ -145,7 +153,7 @@ export function HomeView() {
           {/* greeting */}
           <motion.div {...rise(0)}>
             <h1 className="text-[24px] font-semibold tracking-[-0.01em] text-ink">
-              {greeting(now)}, {firstName(email)}
+              {name ? `${greeting(now)}, ${name}` : greeting(now)}
             </h1>
             <p className="mt-1.5 text-[13px] text-ink-3">
               {openTasks.length === 0
@@ -360,72 +368,96 @@ function QuickAction({
 }
 
 /**
- * Four-step checklist for new workspaces. Steps tick themselves off from
- * real state; the card disappears once done or dismissed.
+ * The one getting-started checklist — three steps that lead to the
+ * moment CoTenk clicks (an agent editing your page), ticked off from
+ * real state. The app opens on Home until it's done or dismissed.
+ * In the browser, where agents can't run, it points to the desktop app.
  */
 function GettingStarted() {
   const docs = useWorkspace((s) => s.docs);
-  const setRailSection = useWorkspace((s) => s.setRailSection);
-  const setMarketTab = useWorkspace((s) => s.setMarketTab);
   const createDoc = useWorkspace((s) => s.createDoc);
-  const chats = useAgent((s) => s.chats);
-  const [dismissed, setDismissed] = useState(() => {
-    try {
-      return localStorage.getItem(ONBOARDING_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
+  const signedIn = useAuth((s) => s.status === "signedIn");
+  const setup = useAgentSetup((s) => s.setup);
+  const checkSetup = useAgentSetup((s) => s.check);
+  const openGuide = useAgentSetup((s) => s.openGuide);
+  const desktop = isDesktop();
+  const [dismissed, setDismissed] = useState(
+    () => onboardingDismissed() || onboardingComplete(),
+  );
+  const [gotApp, setGotApp] = useState(() => desktopAppClicked());
+  useEffect(() => {
+    if (!desktop) return;
+    for (const k of AGENT_KINDS) void checkSetup(k);
+  }, [desktop, checkSetup]);
 
   const seedIds = new Set(seedDocs.map((d) => d.id));
-  const templateTitles = new Set(TEMPLATES.map((t) => t.title));
-  const steps: {
-    label: string;
-    done: boolean;
-    cta: string;
-    run: () => void;
-  }[] = [
-    {
-      label: "Create your own page",
-      done: docs.some((d) => !seedIds.has(d.id)),
-      cta: "New page",
-      run: () => createDoc(),
-    },
-    {
-      label: "Start from a template",
-      done: docs.some((d) => templateTitles.has(d.title)),
-      cta: "Browse",
-      run: () => {
-        setMarketTab("discover");
-        setRailSection("market");
-      },
-    },
-    {
-      label: "Give a task an owner — @you, @claude or @devin",
-      done: extractTasks(docs.filter((d) => !seedIds.has(d.id))).some(
-        (t) => t.assignees.length > 0,
-      ),
-      cta: "Tasks",
-      run: () => setRailSection("tasks"),
-    },
-    {
-      label: "Let an agent work in your workspace",
-      done: chats.some((c) => c.messages.length > 1),
-      cta: "Connect",
-      run: () => setRailSection("agents"),
-    },
-  ];
+  const ownPage = docs.some((d) => !seedIds.has(d.id));
+  const agentReady = Object.values(setup).some(
+    (s) => !!s && s.installed && s.authed,
+  );
+  const notesStep: Step = {
+    label: "Bring your notes — Notion, Obsidian or .md files",
+    hint: "or start a blank page",
+    done: ownPage,
+    cta: "Import",
+    run: () => useWorkspace.getState().setImportOpen(true),
+    alt: () => createDoc(),
+  };
+  const steps: Step[] = desktop
+    ? [
+        {
+          label: "Connect an agent — Claude Code or Devin",
+          done: agentReady,
+          cta: "Set up",
+          run: () => openGuide(),
+        },
+        {
+          label: "Watch it edit a page — ask it on the welcome page",
+          done: hasAgentChangedPage(),
+          cta: "Try it",
+          blocked: !agentReady,
+          run: () => {
+            openWelcomePage();
+            useWorkspace.getState().requestAskAgent(WELCOME_ID);
+          },
+        },
+        notesStep,
+      ]
+    : [
+        notesStep,
+        {
+          label: "Get the desktop app — agents run there",
+          done: gotApp,
+          cta: "Download",
+          run: () => {
+            markDesktopAppClicked();
+            setGotApp(true);
+            openExternal(DESKTOP_DOWNLOAD_URL);
+          },
+        },
+        {
+          label: "Sign in to keep your pages on every device",
+          done: signedIn,
+          cta: "Sign in",
+          run: () =>
+            requestSignIn(
+              "Sign in to open this workspace on your other devices.",
+            ),
+        },
+      ];
   const doneCount = steps.filter((s) => s.done).length;
+  const allDone = doneCount === steps.length;
 
-  if (dismissed || doneCount === steps.length) return null;
+  useEffect(() => {
+    if (allDone) completeOnboarding();
+  }, [allDone]);
+
+  if (dismissed || allDone) return null;
+  const current = steps.findIndex((s) => !s.done);
 
   const dismiss = () => {
     setDismissed(true);
-    try {
-      localStorage.setItem(ONBOARDING_KEY, "1");
-    } catch {
-      /* storage unavailable */
-    }
+    dismissOnboarding();
   };
 
   return (
@@ -454,42 +486,91 @@ function GettingStarted() {
           <X size={12} />
         </button>
       </div>
-      <div className="mt-3 grid grid-cols-1 gap-1 sm:grid-cols-2">
-        {steps.map((s) => (
-          <div
+      <ol className="mt-3 flex flex-col gap-1">
+        {steps.map((s, i) => (
+          <li
             key={s.label}
-            className="flex items-center gap-2.5 rounded-[8px] px-2 py-1.5"
+            className={`flex items-center gap-2.5 rounded-[8px] px-2 py-2 ${
+              i === current ? "bg-panel-2" : ""
+            }`}
           >
             <span
-              className={`grid h-4 w-4 shrink-0 place-items-center rounded-full border ${
+              className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[11px] ${
                 s.done
                   ? "border-accent bg-accent text-on-accent"
-                  : "border-line"
+                  : i === current
+                    ? "border-accent text-accent"
+                    : "border-line text-ink-3"
               }`}
             >
-              {s.done && <Check size={9} weight="bold" />}
+              {s.done ? <Check size={10} weight="bold" /> : i + 1}
             </span>
             <span
-              className={`min-w-0 flex-1 truncate text-[12.5px] ${
+              className={`min-w-0 flex-1 truncate text-[13px] ${
                 s.done ? "text-ink-3 line-through" : "text-ink-2"
               }`}
             >
               {s.label}
             </span>
+            {!s.done && s.alt && s.hint && (
+              <button
+                type="button"
+                onClick={s.alt}
+                className="hidden shrink-0 text-[11.5px] text-ink-3 transition-colors hover:text-ink-2 sm:inline"
+              >
+                {s.hint}
+              </button>
+            )}
             {!s.done && (
               <button
                 type="button"
                 onClick={s.run}
-                className="shrink-0 rounded-[6px] px-2 py-0.5 text-[11.5px] text-accent transition-colors hover:bg-hover"
+                disabled={s.blocked}
+                title={s.blocked ? "Connect an agent first" : undefined}
+                className={`shrink-0 rounded-[6px] px-2.5 py-1 text-[12px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                  i === current
+                    ? "bg-accent text-on-accent hover:bg-accent-2"
+                    : "text-accent hover:bg-hover"
+                }`}
               >
                 {s.cta}
               </button>
             )}
-          </div>
+          </li>
         ))}
-      </div>
+      </ol>
     </section>
   );
+}
+
+type Step = {
+  label: string;
+  done: boolean;
+  cta: string;
+  run: () => void;
+  /** Secondary action shown as a quiet link, e.g. "or start a blank page". */
+  hint?: string;
+  alt?: () => void;
+  /** Can't be done yet (an earlier step is missing). */
+  blocked?: boolean;
+};
+
+const APP_CLICKED_KEY = "cotenk-onboarding-got-app";
+
+function desktopAppClicked(): boolean {
+  try {
+    return localStorage.getItem(APP_CLICKED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markDesktopAppClicked() {
+  try {
+    localStorage.setItem(APP_CLICKED_KEY, "1");
+  } catch {
+    /* storage unavailable */
+  }
 }
 
 function DocCard({

@@ -9,7 +9,7 @@ import {
   Plus,
   Trash,
 } from "@phosphor-icons/react";
-import { trashFolder, useWorkspace } from "@/lib/store";
+import { dropDocInto, isDocDrag, trashFolder, useWorkspace } from "@/lib/store";
 import { DocRow } from "./doc-row";
 import type { Doc, Folder } from "@/lib/types";
 
@@ -39,6 +39,7 @@ export function FolderSection({
     null,
   );
   const dotsRef = useRef<HTMLButtonElement>(null);
+  const [dropOver, setDropOver] = useState(false);
 
   useEffect(() => {
     if (!menu) return;
@@ -69,7 +70,23 @@ export function FolderSection({
           delay: Math.min(index * 0.025, 0.25),
           ease: [0.16, 1, 0.3, 1],
         }}
-        className="group flex h-7 w-full items-center gap-1.5 rounded-[6px] px-2 text-[13px] text-ink-2 transition-colors duration-150 hover:bg-hover"
+        onDragOver={(e) => {
+          if (!isDocDrag(e)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          setDropOver(true);
+        }}
+        onDragLeave={() => setDropOver(false)}
+        onDrop={(e) => {
+          if (!isDocDrag(e)) return;
+          e.preventDefault();
+          setDropOver(false);
+          setOpen(true);
+          dropDocInto(e, folder.id);
+        }}
+        className={`group flex h-7 w-full items-center gap-1.5 rounded-[6px] px-2 text-[13px] text-ink-2 transition-colors duration-150 hover:bg-hover ${
+          dropOver ? "bg-accent-dim text-ink ring-1 ring-accent-line" : ""
+        }`}
       >
         {renaming ? (
           <>

@@ -3,6 +3,7 @@ import { ArrowRight, Lightning, Square, Warning } from "@phosphor-icons/react";
 import { useActiveChat, useAgent } from "@/lib/agent-store";
 import { useWorkspace } from "@/lib/store";
 import { AGENTS } from "@/lib/agents";
+import { usePermissions } from "@/lib/agent-permissions";
 
 /**
  * Floating status pill shown outside the Agents view while an agent turn
@@ -24,6 +25,7 @@ export function AgentActivity() {
   const rail = useWorkspace((s) => s.railSection);
   const setRail = useWorkspace((s) => s.setRailSection);
   const reduceMotion = useReducedMotion();
+  const waiting = usePermissions((s) => s.queue.length > 0);
 
   const running = status === "running" || status === "starting";
   const failed = status === "error" && !!error;
@@ -35,7 +37,9 @@ export function AgentActivity() {
     ?.text;
   const line = failed
     ? error
-    : status === "starting"
+    : waiting
+      ? "Waiting for your approval"
+      : status === "starting"
       ? "Starting…"
       : (lastTool ?? "Thinking…");
 

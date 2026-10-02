@@ -1,11 +1,19 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import { CheckSquare, FileText, Plus, X } from "@phosphor-icons/react";
+import {
+  CheckSquare,
+  FileText,
+  Kanban,
+  ListChecks,
+  Plus,
+  X,
+} from "@phosphor-icons/react";
 import {
   useWorkspace,
   type TaskFilter,
   type TaskGroup,
+  type TaskView,
 } from "@/lib/store";
 import {
   appendTask,
@@ -16,6 +24,8 @@ import {
   type TaskItem,
 } from "@/lib/tasks";
 import { TaskRow } from "./task-row";
+import { TaskBoard } from "./task-board";
+import { useSuggest } from "@/components/ui/use-suggest";
 
 const EASE_OUT_EXPO: [number, number, number, number] = [0.16, 1, 0.3, 1];
 
@@ -61,6 +71,8 @@ export function TasksView() {
   const taskFilter = useWorkspace((s) => s.taskFilter);
   const taskGroup = useWorkspace((s) => s.taskGroup);
   const setTaskGroup = useWorkspace((s) => s.setTaskGroup);
+  const taskView = useWorkspace((s) => s.taskView);
+  const setTaskView = useWorkspace((s) => s.setTaskView);
   const assignee = useWorkspace((s) => s.taskAssignee);
   const setAssignee = useWorkspace((s) => s.setTaskAssignee);
   const setActiveDoc = useWorkspace((s) => s.setActiveDoc);
@@ -75,6 +87,11 @@ export function TasksView() {
   const tasks = extractTasks(docs);
   const openCount = tasks.reduce((n, t) => n + (t.done ? 0 : 1), 0);
 
+  // The board shows open and done side by side — only the person filter
+  // applies there.
+  const byAssignee = tasks.filter(
+    (t) => !assignee || t.assignees.some((a) => a.toLowerCase() === assignee),
+  );
   const filtered = tasks.filter(
     (t) =>
       (taskFilter === "all" ? true : taskFilter === "open" ? !t.done : t.done) &&
@@ -126,7 +143,17 @@ export function TasksView() {
     }
   };
 
+  const draftRef = useRef<HTMLInputElement | null>(null);
+  // "@" suggests people and agents, "due:" dates, "[[" pages.
+  const suggest = useSuggest({
+    ref: draftRef,
+    value: draft,
+    onChange: setDraft,
+    mode: "page",
+  });
+
   const onQuickAddKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (suggest.onKeyDown(e)) return;
     if (e.key === "Enter") {
       const text = draft.trim();
       if (text !== "") {
@@ -161,8 +188,33 @@ export function TasksView() {
         )}
         <div
           role="radiogroup"
-          aria-label="Group tasks"
+          aria-label="Task view"
           className="ml-auto flex items-center rounded-[7px] border border-line bg-panel p-0.5"
+        >
+          {(["list", "board"] as TaskView[]).map((v) => (
+            <button
+              key={v}
+              type="button"
+              role="radio"
+              aria-checked={taskView === v}
+              onClick={() => setTaskView(v)}
+              className={`flex h-6 items-center gap-1 rounded-[5px] px-2 text-[11.5px] transition-colors duration-150 ${
+                taskView === v
+                  ? "bg-elev text-ink"
+                  : "text-ink-3 hover:text-ink-2"
+              }`}
+            >
+              {v === "list" ? <ListChecks size={12} /> : <Kanban size={12} />}
+              {v === "list" ? "List" : "Board"}
+            </button>
+          ))}
+        </div>
+        <div
+          role="radiogroup"
+          aria-label="Group tasks"
+          className={`flex items-center rounded-[7px] border border-line bg-panel p-0.5 ${
+            taskView === "board" ? "hidden" : ""
+          }`}
         >
           {(["page", "due"] as TaskGroup[]).map((g) => (
             <button
@@ -185,22 +237,35 @@ export function TasksView() {
 
       {/* task list */}
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[760px] px-6 py-10 md:px-14">
+        <div
+          className={
+            taskView === "board"
+              ? "w-full px-6 py-8"
+              : "mx-auto w-full max-w-[760px] px-6 py-10 md:px-14"
+          }
+        >
           {/* quick add */}
           <div className="flex h-10 items-center gap-2.5 rounded-[10px] border border-line-soft bg-panel px-3 focus-within:border-accent-line">
             <Plus size={15} className="shrink-0 text-ink-3" />
             <input
+              ref={draftRef}
               value={draft}
               onChange={(e) => setDraft(e.currentTarget.value)}
               onKeyDown={onQuickAddKeyDown}
-              placeholder="Add a task — @who due:2026-10-01 — lands in Inbox"
+              {...suggest.fieldProps}
+              placeholder="Add a task — @who, due: and [[page]] are suggested — lands in Inbox"
               aria-label="Add a task"
               spellCheck={false}
               className="flex-1 bg-transparent text-[13.5px] text-ink outline-none placeholder:text-ink-3"
             />
+            {suggest.menu}
           </div>
 
-          {groups.length === 0 ? (
+          {taskView === "board" ? (
+            <div className="mt-6">
+              <TaskBoard tasks={byAssignee} today={today} />
+            </div>
+          ) : groups.length === 0 ? (
             <motion.div
               initial={reduceMotion ? false : { opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}

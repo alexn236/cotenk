@@ -6,6 +6,8 @@ export type Folder = {
 export type Doc = {
   id: string;
   folderId: string | null;
+  /** Page this one is nested under (subpage); null/absent = top level. */
+  parentId?: string | null;
   title: string;
   /** Raw markdown source of the document. */
   content: string;

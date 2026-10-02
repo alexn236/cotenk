@@ -2,7 +2,13 @@ import { useWorkspace } from "./store";
 import { askAgent } from "./agent-actions";
 import { docContext } from "./agent-context";
 import { agentForHandle } from "./agents";
-import { toggleTaskAtLine, type TaskItem } from "./tasks";
+import {
+  setTaskDueAtLine,
+  setTaskRepeatAtLine,
+  toggleTaskAtLine,
+  type Repeat,
+  type TaskItem,
+} from "./tasks";
 
 /** Flips a task's checkbox in its source doc. */
 export function toggleTask(task: TaskItem, done: boolean) {
@@ -10,6 +16,33 @@ export function toggleTask(task: TaskItem, done: boolean) {
   const doc = st.docs.find((d) => d.id === task.docId);
   if (!doc) return;
   st.updateDocContent(doc.id, toggleTaskAtLine(doc.content, task.lineIndex, done));
+}
+
+/** Sets or clears a task's due date in its source doc. */
+export function setTaskDue(task: TaskItem, due: string | null) {
+  const st = useWorkspace.getState();
+  const doc = st.docs.find((d) => d.id === task.docId);
+  if (!doc) return;
+  st.updateDocContent(doc.id, setTaskDueAtLine(doc.content, task.lineIndex, due));
+}
+
+/** Sets or clears how a task repeats. */
+export function setTaskRepeat(task: TaskItem, repeat: Repeat | null) {
+  const st = useWorkspace.getState();
+  const doc = st.docs.find((d) => d.id === task.docId);
+  if (!doc) return;
+  st.updateDocContent(doc.id, setTaskRepeatAtLine(doc.content, task.lineIndex, repeat));
+}
+
+/** Moves a task to a board column: re-dates it and/or flips done. */
+export function moveTask(task: TaskItem, done: boolean, due: string | null | undefined) {
+  const st = useWorkspace.getState();
+  const doc = st.docs.find((d) => d.id === task.docId);
+  if (!doc) return;
+  let content = doc.content;
+  if (done !== task.done) content = toggleTaskAtLine(content, task.lineIndex, done);
+  if (due !== undefined) content = setTaskDueAtLine(content, task.lineIndex, due);
+  if (content !== doc.content) st.updateDocContent(doc.id, content);
 }
 
 /**

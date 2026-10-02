@@ -15,7 +15,9 @@ export type BlockType =
   | "quote"
   | "code"
   | "divider"
-  | "embed";
+  | "embed"
+  | "image"
+  | "file";
 
 export type BlockData = {
   id: string;
@@ -154,6 +156,18 @@ export function parseBlocks(content: string): BlockData[] {
     // pure divider
     if (/^\s*([-*_])\1{2,}\s*$/.test(trimmed)) {
       push("divider", "");
+      continue;
+    }
+
+    // a picture on its own: `![alt](src)`
+    if (/^!\[[^\]\n]*\]\([^)\s]+\)$/.test(trimmed)) {
+      push("image", trimmed);
+      continue;
+    }
+
+    // an attached file: `[name](cotenk-file:path)`
+    if (/^\[[^\]\n]+\]\(cotenk-file:[^)\s]+\)$/.test(trimmed)) {
+      push("file", trimmed);
       continue;
     }
 

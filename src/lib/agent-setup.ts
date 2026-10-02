@@ -66,12 +66,29 @@ async function probe(kind: AgentKind): Promise<AgentSetup> {
   };
 }
 
+export type NodeStatus = { node: string | null; npm: boolean };
+
+/** Agents the setup guide can install (npm packages). */
+export const INSTALLABLE: AgentKind[] = ["claude"];
+
 type SetupState = {
   setup: Partial<Record<AgentKind, AgentSetup>>;
   connecting: AgentKind | null;
+  /** Node.js/npm on this machine (null until checked). */
+  node: NodeStatus | null;
+  /** Agent whose CLI is being installed in a terminal right now. */
+  installing: AgentKind | null;
+  /** Guided setup dialog: open flag and the agent it starts on. */
+  guideOpen: boolean;
+  guideKind: AgentKind;
   check: (kind: AgentKind) => Promise<AgentSetup | null>;
+  checkNode: () => Promise<NodeStatus | null>;
   /** Runs the agent's sign-in flow and waits until it reports success. */
   connect: (kind: AgentKind) => Promise<boolean>;
+  /** Installs the CLI in a terminal and waits until it's found. */
+  install: (kind: AgentKind) => Promise<boolean>;
+  openGuide: (kind?: AgentKind) => void;
+  closeGuide: () => void;
 };
 
 const isReady = (s?: AgentSetup) => !!s && s.installed && s.authed;
@@ -94,6 +111,10 @@ const inflight = new Map<AgentKind, Promise<AgentSetup | null>>();
 export const useAgentSetup = create<SetupState>()((set, get) => ({
   setup: {},
   connecting: null,
+  node: null,
+  installing: null,
+  guideOpen: false,
+  guideKind: "claude",
 
   check: (kind) => {
     if (!isDesktop()) return Promise.resolve(null);
@@ -112,12 +133,50 @@ export const useAgentSetup = create<SetupState>()((set, get) => ({
     return p;
   },
 
+  checkNode: async () => {
+    if (!isDesktop()) return null;
+    try {
+      const node = await invoke<NodeStatus>("node_status");
+      set({ node });
+      return node;
+    } catch {
+      return null;
+    }
+  },
+
+  install: async (kind) => {
+    if (get().installing || !INSTALLABLE.includes(kind)) return false;
+    set({ installing: kind });
+    try {
+      await invoke("agent_install", { agent: kind });
+      // npm runs in the terminal; poll until the CLI shows up (~5 min).
+      for (let i = 0; i < 100; i++) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const s = await get().check(kind);
+        if (s?.installed) return true;
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      set({ installing: null });
+    }
+  },
+
+  openGuide: (kind) => {
+    set({
+      guideOpen: true,
+      guideKind: kind ?? useAgent.getState().defaultAgent,
+    });
+  },
+  closeGuide: () => set({ guideOpen: false }),
+
   connect: async (kind) => {
     if (get().connecting) return false;
     set({ connecting: kind });
     try {
-      await invoke(kind === "devin" ? "devin_login" : "claude_login");
-      // Both CLIs finish sign-in in a browser; poll until it lands.
+      await invoke(`${kind}_login`);
+      // The CLIs finish sign-in in a browser; poll until it lands.
       for (let i = 0; i < 60; i++) {
         await new Promise((r) => setTimeout(r, 2000));
         const s = await get().check(kind);

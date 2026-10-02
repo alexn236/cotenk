@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Globe } from "@phosphor-icons/react";
 import type { Doc } from "@/lib/types";
 import { useMarket } from "@/lib/marketplace";
+import { requestSignIn, useAuth } from "@/lib/auth-store";
 import { TEMPLATE_CATEGORIES, type TemplateCategory } from "@/lib/templates";
 import { toast } from "@/lib/toast";
 import { Modal } from "@/components/ui/modal";
@@ -19,6 +20,7 @@ export function PublishDialog({
   doc: Doc | null;
   onClose: () => void;
 }) {
+  const signedIn = useAuth((s) => s.status === "signedIn");
   return (
     <Modal
       open={doc !== null}
@@ -26,13 +28,37 @@ export function PublishDialog({
       title="Publish to marketplace"
       width={480}
     >
-      {doc && <PublishForm key={doc.id} doc={doc} onClose={onClose} />}
+      {doc &&
+        (signedIn ? (
+          <PublishForm key={doc.id} doc={doc} onClose={onClose} />
+        ) : (
+          <div className="flex flex-col items-start gap-3 p-4">
+            <p className="text-[13px] leading-relaxed text-ink-2">
+              Publishing puts a copy of “{doc.title.trim() || "Untitled"}”
+              on the community shelf under your name — that needs an
+              account. Your pages stay exactly as they are.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                requestSignIn("Publishing to the marketplace needs an account.");
+              }}
+              className={btn.primary}
+            >
+              Sign in to publish
+            </button>
+          </div>
+        ))}
     </Modal>
   );
 }
 
 function PublishForm({ doc, onClose }: { doc: Doc; onClose: () => void }) {
   const publish = useMarket((s) => s.publish);
+  const displayName = useAuth((s) => s.displayName);
+  const setDisplayName = useAuth((s) => s.setDisplayName);
+  const [author, setAuthor] = useState(displayName);
   const [title, setTitle] = useState(doc.title.trim() || "Untitled");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState<TemplateCategory>("Planning");
@@ -40,10 +66,20 @@ function PublishForm({ doc, onClose }: { doc: Doc; onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
-    if (!title.trim() || busy) return;
+    if (!title.trim() || !author.trim() || busy) return;
     setBusy(true);
     setError(null);
+    // The name is part of the profile — set it once, reuse it everywhere.
+    if (author.trim() !== displayName) {
+      const nameErr = await setDisplayName(author);
+      if (nameErr) {
+        setBusy(false);
+        setError(nameErr);
+        return;
+      }
+    }
     const err = await publish({
+      author,
       title: title.trim(),
       description: description.trim(),
       category,
@@ -68,6 +104,20 @@ function PublishForm({ doc, onClose }: { doc: Doc; onClose: () => void }) {
           onChange={(e) => setTitle(e.currentTarget.value)}
           className={`${FIELD} h-9`}
         />
+      </div>
+      <div>
+        <label className={LABEL}>Publish as</label>
+        <input
+          value={author}
+          maxLength={60}
+          onChange={(e) => setAuthor(e.currentTarget.value)}
+          placeholder="Your name"
+          className={`${FIELD} h-9`}
+        />
+        <p className="mt-1 text-[11.5px] text-ink-3">
+          Shown on the listing. Saved as your display name — your email
+          is never shown.
+        </p>
       </div>
       <div>
         <label className={LABEL}>Description</label>
@@ -108,7 +158,7 @@ function PublishForm({ doc, onClose }: { doc: Doc; onClose: () => void }) {
       </div>
       <p className="flex gap-2 rounded-[8px] border border-dashed border-line px-3 py-2.5 text-[12px] leading-relaxed text-ink-3">
         <Globe size={14} className="mt-0.5 shrink-0" />
-        Everyone signed in to CoTenk can preview and install a copy. This
+        Anyone can preview and install a copy — no account needed. This
         publishes a snapshot — later edits to your page do not change the
         listing.
       </p>
@@ -120,7 +170,7 @@ function PublishForm({ doc, onClose }: { doc: Doc; onClose: () => void }) {
         <button
           type="button"
           onClick={() => void submit()}
-          disabled={busy || !title.trim()}
+          disabled={busy || !title.trim() || !author.trim()}
           className={btn.primary}
         >
           {busy ? "Publishing…" : "Publish"}

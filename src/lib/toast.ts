@@ -30,5 +30,8 @@ export const useToasts = create<ToastState>((set, get) => ({
 
 export const toast = (
   message: string,
-  opts?: Omit<Toast, "id" | "message">,
-) => useToasts.getState().show({ message, ...opts });
+  opts?: Omit<Toast, "id" | "message"> & { ttlMs?: number },
+) => {
+  const { ttlMs, ...rest } = opts ?? {};
+  useToasts.getState().show({ message, ...rest }, ttlMs);
+};

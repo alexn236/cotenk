@@ -7,12 +7,13 @@ import {
   Lightning,
   MagnifyingGlass,
   Moon,
+  SignIn,
   Storefront,
   Sun,
   type Icon,
 } from "@phosphor-icons/react";
 import { useWorkspace } from "@/lib/store";
-import { useAuth } from "@/lib/auth-store";
+import { requestSignIn, useAuth } from "@/lib/auth-store";
 import { useAgent } from "@/lib/agent-store";
 import type { RailSection } from "@/lib/types";
 
@@ -40,6 +41,7 @@ export function IconRail() {
   const toggleTheme = useWorkspace((s) => s.toggleTheme);
   const setPaletteOpen = useWorkspace((s) => s.setPaletteOpen);
   const email = useAuth((s) => s.user?.email ?? "");
+  const displayName = useAuth((s) => s.displayName);
   const agentBusy = useAgent(
     (s) => s.status === "running" || s.status === "starting",
   );
@@ -116,20 +118,36 @@ export function IconRail() {
             {theme === "dark" ? "Light theme" : "Dark theme"}
           </span>
         </button>
-        <button
-          type="button"
-          onClick={() => {
-            useWorkspace.getState().setSettingsSection("account");
-            setRailSection("settings");
-          }}
-          aria-label="Account"
-          title={email}
-          className="mt-2 flex h-7 w-7 items-center justify-center rounded-full border border-line bg-elev transition-colors hover:border-accent-line"
-        >
-          <span className="text-[11px] leading-none text-ink-2">
-            {(email[0] ?? "?").toUpperCase()}
-          </span>
-        </button>
+        {email ? (
+          <button
+            type="button"
+            onClick={() => {
+              useWorkspace.getState().setSettingsSection("account");
+              setRailSection("settings");
+            }}
+            aria-label="Account"
+            title={email}
+            className="mt-2 flex h-7 w-7 items-center justify-center rounded-full border border-line bg-elev transition-colors hover:border-accent-line"
+          >
+            <span className="text-[11px] leading-none text-ink-2">
+              {((displayName || email)[0] ?? "?").toUpperCase()}
+            </span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() =>
+              requestSignIn(
+                "Sign in to open this workspace on your other devices.",
+              )
+            }
+            aria-label="Sign in"
+            className="group relative mt-2 flex h-7 w-7 items-center justify-center rounded-full border border-dashed border-line text-ink-3 transition-colors hover:border-accent-line hover:text-accent"
+          >
+            <SignIn size={13} />
+            <span className={TOOLTIP}>Sign in · sync & publish</span>
+          </button>
+        )}
       </div>
     </aside>
   );

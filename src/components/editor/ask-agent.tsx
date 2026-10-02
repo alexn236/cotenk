@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowRight, Lightning } from "@phosphor-icons/react";
 import { useWorkspace } from "@/lib/store";
@@ -6,6 +6,9 @@ import { askAgent } from "@/lib/agent-actions";
 import { DOC_ACTIONS, docContext } from "@/lib/agent-context";
 import type { Doc } from "@/lib/types";
 import { ModelSelect } from "@/components/agents/model-select";
+import { autosizeTextarea, useIsomorphicLayoutEffect } from "./utils";
+import { useSuggest } from "@/components/ui/use-suggest";
+import { referenceContext } from "@/lib/suggest";
 
 /**
  * Dropdown under the editor's "Ask agent" button: free-form instruction
@@ -47,13 +50,28 @@ export function AskAgentPopover({
 function AskAgentBody({ doc, onClose }: { doc: Doc; onClose: () => void }) {
   const folders = useWorkspace((s) => s.folders);
   const [text, setText] = useState("");
+  const areaRef = useRef<HTMLTextAreaElement | null>(null);
+  useIsomorphicLayoutEffect(() => {
+    autosizeTextarea(areaRef.current);
+  }, [text]);
+  const suggest = useSuggest({
+    ref: areaRef,
+    value: text,
+    onChange: setText,
+    mode: "agent",
+  });
   const title = doc.title.trim() || "Untitled";
 
   const run = (prompt: string, label: string) => {
     onClose();
     askAgent({
       prompt,
-      context: docContext(doc, folders),
+      context: [
+        docContext(doc, folders),
+        referenceContext(prompt, useWorkspace.getState().docs, folders),
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
       title: `${label} · ${title}`,
       stay: true,
     });
@@ -62,34 +80,47 @@ function AskAgentBody({ doc, onClose }: { doc: Doc; onClose: () => void }) {
   return (
     <>
       <div className="border-b border-line-soft p-2.5">
-        <div className="flex items-center gap-2 rounded-[8px] border border-line bg-panel-2 px-2.5 focus-within:border-accent-line">
-          <Lightning size={14} className="shrink-0 text-accent" />
-          <input
-            autoFocus
-            value={text}
-            onChange={(e) => setText(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && text.trim()) {
-                e.preventDefault();
-                run(text.trim(), text.trim().slice(0, 40));
-              } else if (e.key === "Escape") {
-                onClose();
-              }
-            }}
-            placeholder="Tell the agent what to do with this page…"
-            aria-label="Instruction for the agent"
-            className="h-9 w-full min-w-0 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3"
-          />
-          <ModelSelect />
-          <button
-            type="button"
-            disabled={!text.trim()}
-            onClick={() => run(text.trim(), text.trim().slice(0, 40))}
-            aria-label="Send to agent"
-            className="grid h-6 w-6 shrink-0 place-items-center rounded-[6px] bg-accent text-on-accent transition-opacity disabled:opacity-30"
-          >
-            <ArrowRight size={12} weight="bold" />
-          </button>
+        <div className="rounded-[8px] border border-line bg-panel-2 px-2.5 pb-1.5 pt-2 focus-within:border-accent-line">
+          <div className="flex items-start gap-2">
+            <Lightning size={14} className="mt-[3px] shrink-0 text-accent" />
+            <textarea
+              ref={areaRef}
+              autoFocus
+              rows={1}
+              value={text}
+              onChange={(e) => setText(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (suggest.onKeyDown(e)) return;
+                // Enter sends, Shift+Enter adds a line.
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (text.trim()) run(text.trim(), text.trim().slice(0, 40));
+                } else if (e.key === "Escape") {
+                  onClose();
+                }
+              }}
+              {...suggest.fieldProps}
+              placeholder="Tell the agent what to do with this page… (@ links another page)"
+              aria-label="Instruction for the agent"
+              className="block max-h-[160px] min-w-0 flex-1 resize-none overflow-y-auto break-words bg-transparent text-[13px] leading-[1.5] text-ink outline-none placeholder:text-ink-3"
+            />
+          </div>
+          <div className="mt-1.5 flex items-center justify-end gap-2">
+            {suggest.menu}
+            <span className="mr-auto font-mono text-[10px] text-ink-3">
+              ↵ send · shift ↵ new line
+            </span>
+            <ModelSelect />
+            <button
+              type="button"
+              disabled={!text.trim()}
+              onClick={() => run(text.trim(), text.trim().slice(0, 40))}
+              aria-label="Send to agent"
+              className="grid h-6 w-6 shrink-0 place-items-center rounded-[6px] bg-accent text-on-accent transition-opacity disabled:opacity-30"
+            >
+              <ArrowRight size={12} weight="bold" />
+            </button>
+          </div>
         </div>
       </div>
       <div className="p-1.5">

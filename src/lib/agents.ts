@@ -32,7 +32,7 @@ export const AGENTS: Record<AgentKind, AgentInfo> = {
 export const AGENT_KINDS: AgentKind[] = ["claude", "devin"];
 
 export const isAgentKind = (v: unknown): v is AgentKind =>
-  v === "devin" || v === "claude";
+  typeof v === "string" && (AGENT_KINDS as string[]).includes(v);
 
 /** Agent a task owner like "@claude" refers to, if any. */
 export function agentForHandle(name: string): AgentKind | null {

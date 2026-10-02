@@ -16,9 +16,22 @@ export type TaskItem = {
   assignees: string[];
   /** Local-date string YYYY-MM-DD, or null. */
   due: string | null;
+  /** `every:week` etc. — a new copy appears when it's completed. */
+  repeat: Repeat | null;
+};
+
+export type Repeat = "day" | "weekday" | "week" | "month" | "year";
+export const REPEATS: Repeat[] = ["day", "weekday", "week", "month", "year"];
+export const REPEAT_LABEL: Record<Repeat, string> = {
+  day: "Every day",
+  weekday: "Every weekday",
+  week: "Every week",
+  month: "Every month",
+  year: "Every year",
 };
 
 const DUE_RE = /(?:^|\s)(?:due:|📅\s?)(\d{4}-\d{2}-\d{2})\b/;
+const REPEAT_RE = /(?:^|\s)every:(day|weekday|week|month|year)\b/i;
 const MENTION_RE = /(?:^|\s)@([\p{L}\p{N}_.-]+)/gu;
 
 /** Splits the inline task markers off the visible text. */
@@ -26,18 +39,65 @@ export function parseTaskMeta(raw: string): {
   text: string;
   assignees: string[];
   due: string | null;
+  repeat: Repeat | null;
 } {
   const due = DUE_RE.exec(raw)?.[1] ?? null;
+  const repeat = (REPEAT_RE.exec(raw)?.[1]?.toLowerCase() as Repeat | undefined) ?? null;
   const assignees = [...raw.matchAll(MENTION_RE)].map((m) => m[1]);
   const text = raw
     .replace(DUE_RE, " ")
+    .replace(REPEAT_RE, " ")
     .replace(MENTION_RE, " ")
     // Inline markdown reads as noise in plain task lists.
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
     .replace(/(\*\*|__|`)(.+?)\1/g, "$2")
     .replace(/\s{2,}/g, " ")
     .trim();
-  return { text: text || raw.trim(), assignees, due };
+  return { text: text || raw.trim(), assignees, due, repeat };
+}
+
+function advance(day: string, repeat: Repeat): string {
+  const d = new Date(`${day}T00:00:00`);
+  switch (repeat) {
+    case "day":
+      d.setDate(d.getDate() + 1);
+      break;
+    case "weekday":
+      do d.setDate(d.getDate() + 1);
+      while (d.getDay() === 0 || d.getDay() === 6);
+      break;
+    case "week":
+      d.setDate(d.getDate() + 7);
+      break;
+    case "month": {
+      const dom = d.getDate();
+      d.setDate(1);
+      d.setMonth(d.getMonth() + 1);
+      const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+      d.setDate(Math.min(dom, last));
+      break;
+    }
+    case "year":
+      d.setFullYear(d.getFullYear() + 1);
+      break;
+  }
+  return isoDay(d);
+}
+
+/**
+ * Text of the next copy of a repeating task: same text, due date moved to
+ * the next occurrence after `today`. Null when the task doesn't repeat.
+ */
+export function nextRepeatText(text: string, today: string): string | null {
+  const repeat = REPEAT_RE.exec(text)?.[1]?.toLowerCase() as Repeat | undefined;
+  if (!repeat) return null;
+  const due = DUE_RE.exec(text)?.[1] ?? today;
+  let next = advance(due, repeat);
+  for (let i = 0; next <= today && i < 400; i++) next = advance(next, repeat);
+  const marker = `due:${next}`;
+  return DUE_RE.test(text)
+    ? text.replace(DUE_RE, (m) => `${m.startsWith(" ") ? " " : ""}${marker}`)
+    : `${text.replace(/\s+$/, "")} ${marker}`;
 }
 
 /** @names that refer to agents rather than people. */
@@ -128,9 +188,61 @@ export function toggleTaskAtLine(
 ): string {
   const lines = content.split("\n");
   const line = lines[lineIndex];
-  if (line === undefined || !TASK_RE.test(line)) return content;
+  const m = line === undefined ? null : TASK_RE.exec(line);
+  if (line === undefined || !m) return content;
   lines[lineIndex] = line.replace(/\[[ xX]\]/, `[${done ? "x" : " "}]`);
+  // Completing a repeating task adds the next one right below it.
+  const next = done && m[1] === " " ? nextRepeatText(m[2], isoDay(new Date())) : null;
+  if (next) {
+    lines.splice(lineIndex + 1, 0, line.replace(m[2], next).replace(/\[[ xX]\]/, "[ ]"));
+  }
   return lines.join("\n");
+}
+
+/** Sets (or with null removes) the `every:` marker of a task line. */
+export function setTaskRepeatAtLine(
+  content: string,
+  lineIndex: number,
+  repeat: Repeat | null,
+): string {
+  const lines = content.split("\n");
+  const line = lines[lineIndex];
+  if (line === undefined || !TASK_RE.test(line)) return content;
+  const stripped = line.replace(/\s*every:(?:day|weekday|week|month|year)\b/gi, "");
+  lines[lineIndex] = repeat ? `${stripped.replace(/\s+$/, "")} every:${repeat}` : stripped;
+  return lines.join("\n");
+}
+
+/**
+ * Returns doc content with the task at lineIndex re-dated: an existing
+ * `due:` marker is replaced (or removed for `due === null`), otherwise
+ * one is appended.
+ */
+export function setTaskDueAtLine(
+  content: string,
+  lineIndex: number,
+  due: string | null,
+): string {
+  const lines = content.split("\n");
+  const line = lines[lineIndex];
+  if (line === undefined || !TASK_RE.test(line)) return content;
+  const stripped = line.replace(/\s*(?:due:|📅\s?)\d{4}-\d{2}-\d{2}\b/g, "");
+  lines[lineIndex] = due ? `${stripped.replace(/\s+$/, "")} due:${due}` : stripped;
+  return lines.join("\n");
+}
+
+/** YYYY-MM-DD `days` after `today`. */
+export function addDays(today: string, days: number): string {
+  const d = new Date(`${today}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return isoDay(d);
+}
+
+/** The coming Friday within the next 7 days (a week out on Fridays). */
+export function nextFriday(today: string): string {
+  const d = new Date(`${today}T00:00:00`);
+  const diff = (5 - d.getDay() + 7) % 7 || 7;
+  return addDays(today, diff);
 }
 
 /** Appends a `- [ ] text` line to doc content (keeps a clean newline edge). */
@@ -141,6 +253,7 @@ export function appendTask(content: string, text: string): string {
 }
 
 const DUE_TOKEN_RE = /(^|\s)(?:due:|📅\s?)(\d{4}-\d{2}-\d{2})\b/g;
+const REPEAT_TOKEN_RE = /(^|\s)every:(day|weekday|week|month|year)\b/gi;
 const MENTION_TOKEN_RE = /(^|\s)@([\p{L}\p{N}_.-]+)/gu;
 
 /**
@@ -152,6 +265,10 @@ export function decorateTaskText(text: string): string {
   if (text.includes("`")) return text;
   return text
     .replace(DUE_TOKEN_RE, (_m, pre: string, d: string) => `${pre}\`due:${d}\``)
+    .replace(
+      REPEAT_TOKEN_RE,
+      (_m, pre: string, r: string) => `${pre}\`every:${r.toLowerCase()}\``,
+    )
     .replace(MENTION_TOKEN_RE, (_m, pre: string, n: string) => `${pre}\`@${n}\``);
 }
 

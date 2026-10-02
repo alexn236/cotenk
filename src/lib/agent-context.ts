@@ -1,12 +1,23 @@
 import type { Doc, Folder } from "./types";
+import type { AgentKind } from "./agents";
 import { docRelativePath } from "./file-sync";
 
+/** Where each agent finds the full workspace guide (see extensions-runtime). */
+const GUIDE: Record<AgentKind, string> = {
+  claude: "the cotenk-workspace skill",
+  devin:
+    'the cotenk-workspace skill — load it with the load_skill tool of the "cotenk" MCP server, which also carries the tools of the MCP servers enabled in CoTenk',
+};
+
 /**
- * Workspace conventions handed to any ACP agent on the first turn of a
+ * Workspace conventions handed to the agent on the first turn of a
  * chat. The agent works on the local mirror of the workspace, so these
  * rules are what keep its output readable by the CoTenk editor.
  */
-export const WORKSPACE_PREAMBLE = `You are working inside a CoTenk workspace — a shared markdown workspace for people and agents. The current directory is the workspace root.
+export const workspacePreamble = (agent: AgentKind) =>
+  WORKSPACE_PREAMBLE.replace("{guide}", GUIDE[agent]);
+
+const WORKSPACE_PREAMBLE = `You are working inside a CoTenk workspace — a shared markdown workspace for people and agents. The current directory is the workspace root.
 
 Conventions:
 - Every page is a .md file. Subfolders are page folders (one level deep).
@@ -14,9 +25,10 @@ Conventions:
 - To create a new page, write a new .md file whose first line is "# <Title>". No frontmatter needed — CoTenk adopts it automatically.
 - Supported blocks: headings (#, ##, ###), paragraphs, "- " bullets, "1. " lists, "- [ ] " tasks, "> " quotes, fenced code, "---" dividers and GFM tables. Separate blocks with a blank line.
 - Tasks may carry "@name" for an assignee and "due:YYYY-MM-DD" for a due date.
-- Interactive embeds: a block of raw, self-contained HTML (inline <style>/<script>, no external URLs or libraries) starting with a tag like <div> — it renders in a sandboxed iframe. Keep embeds under ~250 lines and avoid blank lines inside them. Keep the background transparent and use the theme variables CoTenk injects: var(--ck-ink), var(--ck-ink-2), var(--ck-ink-3) for text, var(--ck-accent), var(--ck-accent-dim) for highlights, var(--ck-panel), var(--ck-panel-2), var(--ck-line) for surfaces and borders, var(--ck-danger) for errors.
+- Link other pages with [[Page title]] (or [[Page title|label]]).
+- Interactive embeds: a block of raw, self-contained HTML (inline <style>/<script>, no external URLs or libraries) starting with a tag like <div> — it renders in a sandboxed iframe. Keep embeds under ~250 lines and avoid blank lines inside them. To keep widget state across reloads call cotenk.save(data) and read cotenk.state on load. Keep the background transparent and use the theme variables CoTenk injects: var(--ck-ink), var(--ck-ink-2), var(--ck-ink-3) for text, var(--ck-accent), var(--ck-accent-dim) for highlights, var(--ck-panel), var(--ck-panel-2), var(--ck-line) for surfaces and borders, var(--ck-danger) for errors.
 - Keep edits focused; do not delete content you were not asked to change.
-- The full guide (file rules, embeds, task hand-offs, recipes) is in .claude/skills/cotenk-workspace/SKILL.md — read it before creating pages or embeds. Finish each turn with 1–3 sentences on what changed and in which page.`;
+- The full guide (file rules, embeds, task hand-offs, recipes) is {guide} — read it before creating pages or embeds. More CoTenk skills may be available the same way; use them when they fit the task. Finish each turn with 1–3 sentences on what changed and in which page.`;
 
 /** Short context block that points the agent at one page. */
 export function docContext(doc: Doc, folders: Folder[]): string {

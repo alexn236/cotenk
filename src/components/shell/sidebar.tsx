@@ -1,14 +1,17 @@
 import { motion } from "motion/react";
 import {
+  DownloadSimple,
   FolderPlus,
   MagnifyingGlass,
   Plus,
   PushPin,
   SidebarSimple,
+  SignIn,
   SignOut,
 } from "@phosphor-icons/react";
-import { useWorkspace } from "@/lib/store";
-import { useAuth } from "@/lib/auth-store";
+import { useState } from "react";
+import { dropDocInto, isDocDrag, useWorkspace } from "@/lib/store";
+import { requestSignIn, useAuth } from "@/lib/auth-store";
 import type { Doc, Folder } from "@/lib/types";
 import { TasksNav } from "@/components/tasks/tasks-nav";
 import { SettingsNav } from "@/components/settings/settings-nav";
@@ -34,14 +37,19 @@ export function Sidebar() {
   const setPaletteOpen = useWorkspace((s) => s.setPaletteOpen);
 
   const pinned = docs.filter((d) => d.pinned);
-  const rootDocs = docs.filter((d) => d.folderId === null);
+  // Subpages are listed under their parent row.
+  const ids = new Set(docs.map((d) => d.id));
+  const topLevel = (d: Doc) => !d.parentId || !ids.has(d.parentId);
+  const rootDocs = docs.filter((d) => d.folderId === null && topLevel(d));
 
   // Folders first, then root-level docs. Every row gets a running
   // index so the mount stagger cascades through the whole list.
   const tree: TreeEntry[] = [];
   let rowIndex = pinned.length;
   for (const folder of folders) {
-    const folderDocs = docs.filter((d) => d.folderId === folder.id);
+    const folderDocs = docs.filter(
+      (d) => d.folderId === folder.id && topLevel(d),
+    );
     tree.push({
       kind: "folder",
       id: folder.id,
@@ -120,11 +128,40 @@ export function Sidebar() {
 
 function UserFooter() {
   const user = useAuth((s) => s.user);
+  const displayName = useAuth((s) => s.displayName);
   const signOut = useAuth((s) => s.signOut);
   const syncStatus = useWorkspace((s) => s.syncStatus);
 
-  const email = user?.email ?? "local";
-  const initial = (email[0] ?? "?").toUpperCase();
+  if (!user) {
+    return (
+      <div className="border-t border-line-soft p-2">
+        <button
+          type="button"
+          onClick={() =>
+            requestSignIn(
+              "Sign in to open this workspace on your other devices.",
+            )
+          }
+          className="group flex w-full items-center gap-2 rounded-[6px] px-1.5 py-1 text-left transition-colors duration-150 hover:bg-hover"
+        >
+          <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-dashed border-line text-ink-3 group-hover:border-accent-line group-hover:text-accent">
+            <SignIn size={11} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[12px] text-ink-2 group-hover:text-ink">
+              Local workspace
+            </span>
+            <span className="block truncate text-[10.5px] text-ink-3">
+              Sign in to sync
+            </span>
+          </span>
+        </button>
+      </div>
+    );
+  }
+
+  const label = displayName || user.email;
+  const initial = (label[0] ?? "?").toUpperCase();
   const statusDot =
     syncStatus === "synced"
       ? "bg-emerald-500/70"
@@ -148,8 +185,11 @@ function UserFooter() {
         <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line bg-elev">
           <span className="text-[9px] leading-none text-ink-3">{initial}</span>
         </div>
-        <span className="min-w-0 flex-1 truncate text-[12px] text-ink-2">
-          {email}
+        <span
+          className="min-w-0 flex-1 truncate text-[12px] text-ink-2"
+          title={user.email}
+        >
+          {label}
         </span>
         <span
           title={statusLabel}
@@ -180,6 +220,7 @@ function DocsNav({
   createDoc: (folderId?: string | null) => string;
   createFolder: (name: string) => string;
 }) {
+  const [rootOver, setRootOver] = useState(false);
   return (
     <>
       {pinned.length > 0 && (
@@ -194,17 +235,45 @@ function DocsNav({
                   doc={doc}
                   index={i}
                   indicatorId="doc-active-pinned"
+                  flat
                 />
               ))}
             </section>
           )}
 
           <section>
-            <div className="group/section flex items-center justify-between px-2 pb-1 pt-2">
+            <div
+              title="Drop a page here to move it out of its folder"
+              onDragOver={(e) => {
+                if (!isDocDrag(e)) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                setRootOver(true);
+              }}
+              onDragLeave={() => setRootOver(false)}
+              onDrop={(e) => {
+                if (!isDocDrag(e)) return;
+                e.preventDefault();
+                setRootOver(false);
+                dropDocInto(e, null);
+              }}
+              className={`group/section flex items-center justify-between rounded-[6px] px-2 pb-1 pt-2 ${
+                rootOver ? "bg-accent-dim ring-1 ring-accent-line" : ""
+              }`}
+            >
               <span className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-3">
                 Documents
               </span>
               <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/section:opacity-100 group-focus-within/section:opacity-100">
+                <button
+                  type="button"
+                  title="Import notes (Notion, Obsidian, .md)"
+                  aria-label="Import notes"
+                  onClick={() => useWorkspace.getState().setImportOpen(true)}
+                  className="flex h-5 w-5 items-center justify-center rounded-[4px] text-ink-3 transition-colors duration-150 hover:bg-hover hover:text-ink-2"
+                >
+                  <DownloadSimple size={14} />
+                </button>
                 <button
                   type="button"
                   title="New folder"

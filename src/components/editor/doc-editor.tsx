@@ -13,6 +13,7 @@ import {
   CaretRight,
   DotsThree,
   Lightning,
+  LinkSimple,
   List,
   Note,
   Sparkle,
@@ -30,12 +31,23 @@ import {
   type BlockData,
   type BlockType,
 } from "@/lib/blocks";
+import { withEmbedState } from "@/lib/embed-state";
 import { Block } from "./block";
 import { autosizeTextarea, useIsomorphicLayoutEffect } from "./utils";
 import { filterSlashItems } from "./slash-items";
 import { SlashMenu } from "./slash-menu";
 import { ContentsPanel } from "./contents-panel";
 import { AskAgentPopover } from "./ask-agent";
+import { backlinksTo } from "@/lib/wikilinks";
+import { toast } from "@/lib/toast";
+import { isoDay, nextRepeatText } from "@/lib/tasks";
+import {
+  imageFiles,
+  isImageFile,
+  prepareImage,
+  storeFile,
+  storeImage,
+} from "@/lib/images";
 import type { SlashItem } from "./slash-items";
 
 type Snap = {
@@ -84,7 +96,16 @@ function EditorView({ doc }: { doc: Doc }) {
   );
   // `0` renders as "just now"; the first deferred tick sets the real time.
   const [now, setNow] = useState(0);
-  const [menuOpen, setMenuOpen] = useState<"ask" | "page" | null>(null);
+  type Menu = "ask" | "page" | null;
+  const [menuState, setMenuState] = useState<Menu>(null);
+  // Onboarding and the setup guide can ask for "Ask agent" to open here.
+  const askRequested = useWorkspace((s) => s.askAgentDocId === doc.id);
+  const requestAskAgent = useWorkspace((s) => s.requestAskAgent);
+  const menuOpen: Menu = askRequested ? "ask" : menuState;
+  const setMenuOpen = (next: Menu | ((m: Menu) => Menu)) => {
+    if (askRequested) requestAskAgent(null);
+    setMenuState(typeof next === "function" ? next(menuOpen) : next);
+  };
   // Bumped whenever the page changes outside the editor (agent, disk,
   // another device); drives the short "Updated by …" notice.
   const [externalTick, setExternalTick] = useState(0);
@@ -202,6 +223,21 @@ function EditorView({ doc }: { doc: Doc }) {
 
   const folderName =
     folders.find((f) => f.id === doc.folderId)?.name ?? "Docs";
+  const allDocs = useWorkspace((s) => s.docs);
+  const relinkTitle = useWorkspace((s) => s.relinkTitle);
+  const setActiveDoc = useWorkspace((s) => s.setActiveDoc);
+  const titleAtFocus = useRef(doc.title);
+  /** Pages above this one, outermost first. */
+  const ancestors = useMemo(() => {
+    const out: Doc[] = [];
+    let cur = allDocs.find((d) => d.id === doc.parentId);
+    while (cur && out.length < 8 && !out.includes(cur)) {
+      out.unshift(cur);
+      const next: string | null | undefined = cur.parentId;
+      cur = allDocs.find((d) => d.id === next);
+    }
+    return out;
+  }, [allDocs, doc.parentId]);
 
   const editingBlock = blocks.find((b) => b.id === editingId) ?? null;
   const slashQuery =
@@ -462,7 +498,12 @@ function EditorView({ doc }: { doc: Doc }) {
       pendingFocus.current = { id, offset: 0 };
       return;
     }
-    if (prev.type === "code" || prev.type === "embed") {
+    if (
+      prev.type === "code" ||
+      prev.type === "embed" ||
+      prev.type === "image" ||
+      prev.type === "file"
+    ) {
       // Merging prose into a code/embed block would corrupt it; just move in.
       focusBlock(prev.id, prev.text.length);
       return;
@@ -501,8 +542,62 @@ function EditorView({ doc }: { doc: Doc }) {
     }
   };
 
+  /** Puts image paragraphs after `afterId` (or at the end). */
+  const placeImages = (mds: string[], afterId: string | null) => {
+    const i = afterId ? blocks.findIndex((b) => b.id === afterId) : -1;
+    const made = mds.map((md) =>
+      createBlock(md.startsWith("![") ? "image" : "file", md),
+    );
+    const next = [...blocks];
+    const target = i >= 0 ? blocks[i] : null;
+    const replace =
+      target?.type === "paragraph" && target.text.trim() === "";
+    const at = replace ? i : i >= 0 ? i + 1 : next.length;
+    next.splice(at, replace ? 1 : 0, ...made);
+    const tail = at + made.length >= next.length ? createBlock() : null;
+    if (tail) next.push(tail);
+    sync(next);
+    if (tail) focusBlock(tail.id, 0);
+  };
+  const placeImagesRef = useRef(placeImages);
+  useEffect(() => {
+    placeImagesRef.current = placeImages;
+  });
+
+  const addImages = async (
+    files: File[],
+    afterId: string | null,
+    asFiles = false,
+  ) => {
+    const mds: string[] = [];
+    for (const f of files) {
+      try {
+        if (asFiles && !isImageFile(f)) {
+          mds.push(await storeFile(f));
+        } else {
+          const ref = await storeImage(await prepareImage(f), "note");
+          mds.push(`![](${ref})`);
+        }
+      } catch (e) {
+        toast(e instanceof Error ? e.message : String(e), { tone: "error" });
+      }
+    }
+    if (mds.length > 0) placeImagesRef.current(mds, afterId);
+  };
+
+  const imageInput = useRef<HTMLInputElement | null>(null);
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const imageAfter = useRef<string | null>(null);
+
   const pickSlash = (item: SlashItem) => {
     if (!editingId) return;
+    if (item.action === "image" || item.action === "file") {
+      imageAfter.current = editingId;
+      patchBlock(editingId, { text: "" });
+      setEditingId(null);
+      (item.action === "image" ? imageInput : fileInput).current?.click();
+      return;
+    }
     if (item.action === "ask-agent") {
       // Clear the "/query" text, then open the agent prompt.
       patchBlock(editingId, { text: "" });
@@ -571,6 +666,18 @@ function EditorView({ doc }: { doc: Doc }) {
         <nav className="flex min-w-0 items-center gap-1.5 text-[12.5px]">
           <span className="truncate text-ink-3">{folderName}</span>
           <CaretRight size={10} className="shrink-0 text-ink-3" />
+          {ancestors.map((a) => (
+            <span key={a.id} className="flex min-w-0 items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setActiveDoc(a.id)}
+                className="truncate text-ink-3 hover:text-ink-2"
+              >
+                {a.title.trim() || "Untitled"}
+              </button>
+              <CaretRight size={10} className="shrink-0 text-ink-3" />
+            </span>
+          ))}
           <span className="truncate text-ink-2">
             {doc.title.trim() || "Untitled"}
           </span>
@@ -708,7 +815,51 @@ function EditorView({ doc }: { doc: Doc }) {
       </header>
 
       {/* document column */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+      <input
+        ref={imageInput}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const files = imageFiles(e.currentTarget.files);
+          e.currentTarget.value = "";
+          if (files.length > 0) void addImages(files, imageAfter.current);
+        }}
+      />
+      <input
+        ref={fileInput}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const files = Array.from(e.currentTarget.files ?? []);
+          e.currentTarget.value = "";
+          if (files.length > 0) void addImages(files, imageAfter.current, true);
+        }}
+      />
+      <div
+        ref={scrollRef}
+        data-image-drop=""
+        className="flex-1 overflow-y-auto"
+        onPaste={(e) => {
+          const files = Array.from(e.clipboardData.files);
+          if (files.length === 0) return;
+          e.preventDefault();
+          void addImages(files, editingId, true);
+        }}
+        onDragOver={(e) => {
+          if (imageFiles(e.dataTransfer.files).length > 0 || e.dataTransfer.types.includes("Files")) {
+            e.preventDefault();
+          }
+        }}
+        onDrop={(e) => {
+          const files = imageFiles(e.dataTransfer.files);
+          if (files.length === 0) return;
+          e.preventDefault();
+          void addImages(files, editingId);
+        }}
+      >
         <div className="mx-auto w-full max-w-[720px] px-6 py-12 md:px-16">
           <textarea
             ref={titleRef}
@@ -720,6 +871,10 @@ function EditorView({ doc }: { doc: Doc }) {
             spellCheck={false}
             onChange={(e) => setTitle(e.currentTarget.value)}
             onKeyDown={onTitleKeyDown}
+            onFocus={() => {
+              titleAtFocus.current = doc.title;
+            }}
+            onBlur={() => relinkTitle(doc.id, titleAtFocus.current, doc.title)}
             className="mb-8 block w-full resize-none bg-transparent text-[34px] font-semibold leading-[1.15] tracking-[-0.02em] text-ink outline-none placeholder:text-ink-3"
           />
 
@@ -750,11 +905,33 @@ function EditorView({ doc }: { doc: Doc }) {
                   setEditingId((cur) => (cur === block.id ? null : cur))
                 }
                 onInsertBelow={() => insertAfter(block.id)}
-                onToggleChecked={(checked) =>
-                  patchBlock(block.id, { checked })
-                }
+                onToggleChecked={(checked) => {
+                  // Completing a repeating task adds the next one below.
+                  const next =
+                    checked && !block.checked
+                      ? nextRepeatText(block.text, isoDay(new Date()))
+                      : null;
+                  if (!next) {
+                    patchBlock(block.id, { checked });
+                    return;
+                  }
+                  const i = blocks.findIndex((b) => b.id === block.id);
+                  const copy = createBlock("todo", next);
+                  const list = blocks.map((b) =>
+                    b.id === block.id ? { ...b, checked } : b,
+                  );
+                  list.splice(i + 1, 0, { ...copy, checked: false });
+                  sync(list);
+                }}
                 onLangChange={(lang) =>
                   patchBlock(block.id, { lang: lang.trim() || undefined })
+                }
+                onEmbedState={(json) =>
+                  patchBlock(
+                    block.id,
+                    { text: withEmbedState(block.text, json) },
+                    `state:${block.id}`,
+                  )
                 }
               />
             ))}
@@ -768,9 +945,11 @@ function EditorView({ doc }: { doc: Doc }) {
 
             {/* click target for continuing at the end of the document */}
             <div
-              className="min-h-[30vh] cursor-text"
+              className="min-h-[18vh] cursor-text"
               onClick={onClickBelow}
             />
+            <Backlinks doc={doc} />
+            <div className="min-h-[12vh] cursor-text" onClick={onClickBelow} />
           </div>
         </div>
       </div>
@@ -790,6 +969,37 @@ function EditorView({ doc }: { doc: Doc }) {
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+/** Pages that link here with [[this title]]. */
+function Backlinks({ doc }: { doc: Doc }) {
+  const docs = useWorkspace((s) => s.docs);
+  const setActiveDoc = useWorkspace((s) => s.setActiveDoc);
+  const links = useMemo(() => backlinksTo(docs, doc), [docs, doc]);
+  if (links.length === 0) return null;
+  return (
+    <section className="border-t border-line-soft pt-5">
+      <div className="mb-2 flex items-center gap-1.5 text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-3">
+        <LinkSimple size={12} />
+        Linked from
+        <span className="font-mono normal-case tracking-normal">
+          {links.length}
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {links.map((d) => (
+          <button
+            key={d.id}
+            type="button"
+            onClick={() => setActiveDoc(d.id)}
+            className="rounded-full border border-line bg-panel px-2.5 py-1 text-[12px] text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink"
+          >
+            {d.title.trim() || "Untitled"}
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 

@@ -1,19 +1,26 @@
 //! CoTenk desktop backend.
 //!
 //! Owns the local ACP agent subprocesses (newline-delimited JSON-RPC over
-//! stdio) — one per agent kind (`devin acp`, the Claude Code ACP adapter)
-//! — and exposes them to the webview via commands + events:
+//! stdio) — one per agent kind (`devin acp` and the Claude Code ACP
+//! adapter) — and exposes them to the webview via commands + events:
 //!
 //!   commands: acp_spawn / acp_write / acp_kill / devin_api_key /
 //!             devin_status / devin_login / claude_status / claude_login /
-//!             workspace_dir / fs_read / fs_write / fs_remove /
-//!             fs_list_md / fs_watch / fs_unwatch / open_folder
+//!             node_status / agent_install / workspace_dir /
+//!             extensions_paths / fs_read /
+//!             fs_write / fs_remove / fs_list_md / fs_watch / fs_unwatch /
+//!             open_folder / open_url
 //!   events:   "acp:line" ({agent, line} per stdout line),
 //!             "acp:exit" (id of the agent whose process ended),
 //!             "ws:fs" (paths changed inside the watched workspace)
 //!
 //! All ACP/JSON-RPC logic stays in the frontend; this side is a dumb,
 //! reliable pipe plus local file/credential helpers.
+//!
+//! Started as `cotenk --mcp-gateway <config>`, the binary instead runs the
+//! MCP gateway for Devin CLI (see mcp_gateway.rs) and never opens a window.
+
+mod mcp_gateway;
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -36,7 +43,7 @@ struct AcpProcess {
 
 struct WatchState(Mutex<Option<notify::RecommendedWatcher>>);
 
-/// agent id ("devin" | "claude") → its running process
+/// agent id ("devin" | "claude") → its process
 #[derive(Default)]
 struct AcpState(Mutex<HashMap<String, AcpProcess>>);
 
@@ -152,12 +159,36 @@ fn workspace_dir() -> String {
     base.join("CoTenk").to_string_lossy().to_string()
 }
 
+#[derive(Serialize)]
+struct ExtensionsPaths {
+    /// App-data folder for CoTenk's skills/MCP files — outside the
+    /// workspace and outside ~/.claude, so plain CLI runs never see them.
+    dir: String,
+    /// This binary; `<exe> --mcp-gateway <config>` is Devin's MCP gateway.
+    exe: String,
+}
+
+#[tauri::command]
+fn extensions_paths(app: AppHandle) -> Result<ExtensionsPaths, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app data dir: {e}"))?
+        .join("extensions");
+    let exe = std::env::current_exe().map_err(|e| format!("current exe: {e}"))?;
+    Ok(ExtensionsPaths {
+        dir: dir.to_string_lossy().to_string(),
+        exe: exe.to_string_lossy().to_string(),
+    })
+}
+
 #[tauri::command]
 fn acp_spawn(
     app: AppHandle,
     state: State<AcpState>,
     agent: String,
     dir: Option<String>,
+    env: Option<HashMap<String, String>>,
 ) -> Result<(), String> {
     let mut guard = state.0.lock().map_err(|_| "state poisoned")?;
 
@@ -181,6 +212,7 @@ fn acp_spawn(
         match quiet_command(bin)
             .args(args)
             .current_dir(&dir)
+            .envs(env.iter().flatten())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -390,22 +422,22 @@ async fn claude_status() -> ClaudeStatus {
     }
 }
 
-/// Opens a terminal running `claude auth login` — the CLI's sign-in is
-/// interactive (browser + optional code paste), so it needs a console.
-#[tauri::command]
-fn claude_login() -> Result<(), String> {
+/// Opens a terminal window running `line` — CLI sign-ins are interactive
+/// (browser + optional code paste), so they need a console.
+fn open_terminal(title: &str, line: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     let mut cmd = {
         let mut c = Command::new("cmd");
-        c.args(["/C", "start", "Claude Code login", "cmd", "/K", "claude auth login"]);
+        c.args(["/C", "start", title, "cmd", "/K", line]);
         c
     };
     #[cfg(target_os = "macos")]
     let mut cmd = {
+        let _ = title;
         let mut c = Command::new("osascript");
         c.args([
             "-e",
-            "tell application \"Terminal\" to do script \"claude auth login\"",
+            &format!("tell application \"Terminal\" to do script \"{line}\""),
             "-e",
             "tell application \"Terminal\" to activate",
         ]);
@@ -413,8 +445,9 @@ fn claude_login() -> Result<(), String> {
     };
     #[cfg(all(unix, not(target_os = "macos")))]
     let mut cmd = {
+        let _ = title;
         let mut c = Command::new("x-terminal-emulator");
-        c.args(["-e", "claude auth login"]);
+        c.args(["-e", line]);
         c
     };
     cmd.stdin(Stdio::null())
@@ -422,7 +455,43 @@ fn claude_login() -> Result<(), String> {
         .stderr(Stdio::null())
         .spawn()
         .map(|_| ())
-        .map_err(|e| format!("could not open a terminal for `claude auth login`: {e}"))
+        .map_err(|e| format!("could not open a terminal for `{line}`: {e}"))
+}
+
+#[tauri::command]
+fn claude_login() -> Result<(), String> {
+    open_terminal("Claude Code login", "claude auth login")
+}
+
+// ---------- guided agent setup ----------
+
+#[derive(Serialize)]
+struct NodeStatus {
+    /// `node --version` output — Node.js is installed.
+    node: Option<String>,
+    /// npm is on PATH (installs the npm-based agents).
+    npm: bool,
+}
+
+/// Node.js/npm check for the setup guide (Claude Code installs through
+/// npm).
+#[tauri::command]
+async fn node_status() -> NodeStatus {
+    let node = run_first(&bin_candidates("node"), &["--version"]).filter(|s| !s.is_empty());
+    let npm = run_first(&bin_candidates("npm"), &["--version"]).is_some();
+    NodeStatus { node, npm }
+}
+
+/// Installs an agent's CLI in a visible terminal, so people see what
+/// runs (and npm can ask for anything it needs). The commands are fixed
+/// per agent — nothing from the webview reaches the shell.
+#[tauri::command]
+fn agent_install(agent: String) -> Result<(), String> {
+    let line = match agent.as_str() {
+        "claude" => format!("npm install -g @anthropic-ai/claude-code {CLAUDE_ACP_PACKAGE}"),
+        other => return Err(format!("{} can't be installed from here", agent_label(other))),
+    };
+    open_terminal(&format!("Install {}", agent_label(&agent)), &line)
 }
 
 // ---------- workspace filesystem ----------
@@ -438,6 +507,19 @@ fn fs_write(path: String, contents: String) -> Result<(), String> {
         std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {parent:?}: {e}"))?;
     }
     std::fs::write(&path, contents).map_err(|e| format!("write {path}: {e}"))
+}
+
+/// Writes binary data (base64 from the webview) — exports and downloads.
+#[tauri::command]
+fn fs_write_b64(path: String, data: String) -> Result<(), String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data.trim())
+        .map_err(|e| format!("decode: {e}"))?;
+    if let Some(parent) = Path::new(&path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {parent:?}: {e}"))?;
+    }
+    std::fs::write(&path, bytes).map_err(|e| format!("write {path}: {e}"))
 }
 
 #[tauri::command]
@@ -541,6 +623,42 @@ fn fs_unwatch(state: State<WatchState>) {
     }
 }
 
+/// Opens an http(s)/mailto URL in the default browser. Links inside pages
+/// must never navigate the app's own webview away.
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    let lower = url.to_ascii_lowercase();
+    if !(lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("mailto:")) {
+        return Err("only http(s) and mailto links can be opened".into());
+    }
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        // rundll32 hands the URL to the default handler without a shell,
+        // so `&` and friends in query strings stay literal.
+        let mut c = quiet_command("rundll32");
+        c.args(["url.dll,FileProtocolHandler", &url]);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = Command::new("open");
+        c.arg(&url);
+        c
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = {
+        let mut c = Command::new("xdg-open");
+        c.arg(&url);
+        c
+    };
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("open url: {e}"))
+}
+
 /// Reveal a folder in the OS file manager.
 #[tauri::command]
 fn open_folder(path: String) -> Result<(), String> {
@@ -562,6 +680,11 @@ fn open_folder(path: String) -> Result<(), String> {
 }
 
 pub fn run() {
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == mcp_gateway::FLAG) {
+        mcp_gateway::serve(args.get(i + 1).map(String::as_str).unwrap_or_default());
+        return;
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AcpState::default())
@@ -575,14 +698,19 @@ pub fn run() {
             devin_login,
             claude_status,
             claude_login,
+            node_status,
+            agent_install,
             workspace_dir,
+            extensions_paths,
             fs_read,
             fs_write,
+            fs_write_b64,
             fs_remove,
             fs_list_md,
             fs_watch,
             fs_unwatch,
             open_folder,
+            open_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running cotenk");

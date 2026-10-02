@@ -58,6 +58,7 @@ Separate blocks with **one blank line**. Keep consecutive list items on consecut
 | --- | --- |
 | Headings | `# `, `## `, `### ` (one line each, blank line after) |
 | Paragraph | plain text: **bold**, *italic*, `code`, ~~strike~~, [links](https://…) |
+| Page link | `[[Page title]]` or `[[Page title\|label]]` — links another page by its title; the target page lists it under "Linked from" |
 | Bullets / numbers | `- item` / `1. item` |
 | Tasks | `- [ ] open`, `- [x] done` |
 | Quote / callout | `> text` / `> 💡 text` |
@@ -69,7 +70,7 @@ Separate blocks with **one blank line**. Keep consecutive list items on consecut
 Avoid these, which don't render or don't survive editing:
 
 - **Inline HTML** inside markdown (`<br>`, `<span>`, `<details>`) shows as text. Only whole embed blocks render HTML.
-- **Images** (`![](...)`): external and relative images are blocked. Draw with an embed (inline SVG) instead.
+- **Images** (`![](...)`): external and relative images are blocked (imported pages may carry inline `data:` images — keep them as they are). Draw with an embed (inline SVG) instead.
 - **Mermaid or math** fences show as plain code. Use an embed for diagrams.
 - **`####` and deeper** headings are left out of the contents panel. Stay within `#` to `###`.
 - **Nested lists** render flat, and the editor removes the indentation once the user edits the page. Prefer flat lists and use `###` subheadings to group.
@@ -120,7 +121,7 @@ Sandbox limits (`sandbox="allow-scripts"` plus the app's content security policy
 
 - **No external resources:** no CDNs, script or CSS URLs, web fonts, remote images, or `fetch`. Write plain inline JS and CSS. Draw with inline SVG or divs. Use `data:` URIs only if you must.
 - **Not available:** `localStorage`, `sessionStorage`, cookies, IndexedDB, `alert`/`confirm`/`prompt`, form submission (use button click handlers), popups or new windows, `eval`/`new Function`, and any access to the parent page or workspace files.
-- **Widget state is temporary.** It resets whenever the page reloads, the embed is edited or the theme changes. Bake the data into the script, keep the source of truth in the page's markdown, and rewrite the data array when the numbers change.
+- **Saved widget state:** call `cotenk.save(data)` with a small JSON-serializable value (under 64 KB) when the user changes something worth keeping (a slider, a checklist, a counter). On load, read it back from `cotenk.state` (null until the first save), e.g. `var s=(cotenk.state&&cotenk.state.scope)||42`. CoTenk stores it inside the block as a trailing `<script type="application/json" data-cotenk-state>` line — leave that line alone when editing an embed. Everything else resets on reload, so bake reference data into the script and keep the source of truth in the page's markdown.
 - **Sizing:** the frame height follows your content, from 80px up to 600px (taller content scrolls). Don't use `100vh` or `height:100%` on the root. Use fluid widths (flex or grid, percentages).
 
 Theming. The body already has `margin:0`, a transparent background, `color:var(--ck-ink)` and `font:14px/1.5 system-ui`. Never hardcode colors. Use these variables so the embed works in light and dark mode:

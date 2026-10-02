@@ -7,26 +7,64 @@ import {
   Folder,
   Lightning,
   PaperPlaneRight,
+  Paperclip,
   Plugs,
   PushPin,
   Square,
   Trash,
   Warning,
   Wrench,
+  X,
 } from "@phosphor-icons/react";
 import {
   useActiveChat,
   useAgent,
   type AgentMsg,
   type AgentStatus,
+  type SentImage,
 } from "@/lib/agent-store";
+import {
+  imageFiles,
+  prepareImage,
+  storeImage,
+  useImageSrc,
+} from "@/lib/images";
+import { toast } from "@/lib/toast";
 import { useAgentSetup } from "@/lib/agent-setup";
 import { AGENTS } from "@/lib/agents";
+import { usePermissions } from "@/lib/agent-permissions";
 import { Markdown } from "@/components/editor/markdown";
 import { useWorkspace } from "@/lib/store";
 import { DESKTOP_ONLY_MESSAGE, isDesktop } from "@/lib/workspace";
 import { ModelSelect } from "./model-select";
+import {
+  autosizeTextarea,
+  useIsomorphicLayoutEffect,
+} from "@/components/editor/utils";
 import { AgentSwitch } from "./agent-switch";
+import { useSuggest } from "@/components/ui/use-suggest";
+import { referenceContext } from "@/lib/suggest";
+import { newId } from "@/lib/ids";
+
+const MAX_ATTACHMENTS = 5;
+
+type Attachment = { id: string; blob: Blob; preview: string };
+
+/** A picture in the transcript or the composer. */
+function ChatImage({ src }: { src: string }) {
+  const url = useImageSrc(src);
+  return url ? (
+    <img
+      src={url}
+      alt=""
+      className="max-h-48 max-w-full rounded-[8px] border border-line-soft object-cover"
+    />
+  ) : (
+    <span className="grid h-16 w-24 place-items-center rounded-[8px] border border-line-soft bg-panel-2 text-[11px] text-ink-3">
+      Image
+    </span>
+  );
+}
 
 const SUGGESTIONS = [
   "Summarize what this workspace contains",
@@ -65,6 +103,7 @@ export function AgentsView() {
   const errorAgent = useAgent((s) => s.errorAgent);
   const thought = useAgent((s) => s.thought);
   const usage = useAgent((s) => s.usage);
+  const approval = usePermissions((s) => s.mode);
   const projects = useAgent((s) => s.projects);
   const runningChatId = useAgent((s) => s.runningChatId);
   const defaultAgent = useAgent((s) => s.defaultAgent);
@@ -80,8 +119,6 @@ export function AgentsView() {
   const assignChat = useAgent((s) => s.assignChat);
   const chat = useActiveChat();
   const reduceMotion = useReducedMotion();
-  const setRailSection = useWorkspace((s) => s.setRailSection);
-  const setSettingsSection = useWorkspace((s) => s.setSettingsSection);
   const desktop = isDesktop();
 
   const agent = chat?.agent ?? defaultAgent;
@@ -93,6 +130,9 @@ export function AgentsView() {
   const ready = !!setup && setup.installed && setup.authed;
 
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInput = useRef<HTMLInputElement | null>(null);
   const [menu, setMenu] = useState<"project" | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
@@ -130,18 +170,78 @@ export function AgentsView() {
     if (editingTitle) titleRef.current?.select();
   }, [editingTitle]);
 
-  const submit = () => {
+  // Composer grows with its text (typed, pasted or cleared after send)
+  // up to its max height, then scrolls.
+  useIsomorphicLayoutEffect(() => {
+    autosizeTextarea(inputRef.current);
+  }, [input]);
+
+  // "@" or "[[" suggests pages and folders; they reach the agent as
+  // real file paths.
+  const suggest = useSuggest({
+    ref: inputRef,
+    value: input,
+    onChange: setInput,
+    mode: "agent",
+  });
+
+  const addAttachments = async (files: File[]) => {
+    for (const f of files.slice(0, Math.max(0, MAX_ATTACHMENTS - attachments.length))) {
+      try {
+        const blob = await prepareImage(f);
+        setAttachments((cur) =>
+          cur.length >= MAX_ATTACHMENTS
+            ? cur
+            : [...cur, { id: newId(), blob, preview: URL.createObjectURL(blob) }],
+        );
+      } catch (e) {
+        toast(e instanceof Error ? e.message : String(e), { tone: "error" });
+      }
+    }
+  };
+
+  const removeAttachment = (id: string) =>
+    setAttachments((cur) => {
+      cur.filter((a) => a.id === id).forEach((a) => URL.revokeObjectURL(a.preview));
+      return cur.filter((a) => a.id !== id);
+    });
+
+  const canSend = (!!input.trim() || attachments.length > 0) && !running && !uploading;
+
+  const submit = async () => {
+    if (!canSend) return;
     const text = input.trim();
-    if (!text || running) return;
+    const files = attachments;
+    let images: SentImage[] = [];
+    if (files.length > 0) {
+      setUploading(true);
+      try {
+        images = await Promise.all(
+          files.map(async (a) => ({
+            blob: a.blob,
+            ref: await storeImage(a.blob, "chat"),
+          })),
+        );
+      } catch (e) {
+        toast(e instanceof Error ? e.message : String(e), { tone: "error" });
+        return;
+      } finally {
+        setUploading(false);
+      }
+    }
     setInput("");
-    if (inputRef.current) inputRef.current.style.height = "0px";
-    void send(text);
+    setAttachments([]);
+    files.forEach((a) => URL.revokeObjectURL(a.preview));
+    const { docs, folders } = useWorkspace.getState();
+    const context = referenceContext(text, docs, folders) ?? undefined;
+    void send(text, { context, images });
   };
 
   const onComposerKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (suggest.onKeyDown(e)) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      submit();
+      void submit();
     }
   };
 
@@ -150,10 +250,6 @@ export function AgentsView() {
     setEditingTitle(false);
   };
 
-  const openAgentSettings = () => {
-    setSettingsSection("agents");
-    setRailSection("settings");
-  };
 
   const iconBtn =
     "grid h-6 w-6 place-items-center rounded-[6px] text-ink-3 transition-colors duration-150 ease-out-expo hover:bg-hover hover:text-ink-2";
@@ -340,10 +436,13 @@ export function AgentsView() {
                       ) : (
                         <button
                           type="button"
-                          onClick={openAgentSettings}
-                          className="text-[12px] text-accent hover:underline"
+                          onClick={() =>
+                            useAgentSetup.getState().openGuide(agent)
+                          }
+                          className="flex h-8 items-center gap-1.5 rounded-[8px] bg-accent px-3 text-[12.5px] font-medium text-on-accent transition-colors hover:bg-accent-2"
                         >
-                          Setup help in Settings → Agents
+                          <Plugs size={14} />
+                          Set up {agentName}
                         </button>
                       )}
                     </div>
@@ -373,8 +472,19 @@ export function AgentsView() {
             if (m.role === "user") {
               return (
                 <div key={m.id} className="flex justify-end">
-                  <div className="max-w-[80%] whitespace-pre-wrap rounded-[12px] border border-line-soft bg-panel-2 px-3.5 py-2 text-[14px] leading-[1.6] text-ink">
-                    {m.text}
+                  <div className="flex max-w-[80%] flex-col items-end gap-2">
+                    {m.images && m.images.length > 0 && (
+                      <div className="flex flex-wrap justify-end gap-2">
+                        {m.images.map((src) => (
+                          <ChatImage key={src} src={src} />
+                        ))}
+                      </div>
+                    )}
+                    {m.text && (
+                      <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-[12px] border border-line-soft bg-panel-2 px-3.5 py-2 text-[14px] leading-[1.6] text-ink">
+                        {m.text}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -406,10 +516,10 @@ export function AgentsView() {
               {/sign|credential|not found|install/i.test(chatError) && (
                 <button
                   type="button"
-                  onClick={openAgentSettings}
+                  onClick={() => useAgentSetup.getState().openGuide(agent)}
                   className="shrink-0 text-[12px] text-accent hover:underline"
                 >
-                  Open settings
+                  Fix setup
                 </button>
               )}
             </div>
@@ -430,23 +540,82 @@ export function AgentsView() {
               An agent is working in another chat — open it
             </button>
           )}
-          <div className="flex items-end gap-2 rounded-[12px] border border-line bg-panel px-3 py-2 shadow-[0_2px_12px_var(--color-shadow)] transition-colors duration-150 focus-within:border-accent-line">
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              const files = imageFiles(e.currentTarget.files);
+              e.currentTarget.value = "";
+              if (files.length > 0) void addAttachments(files);
+            }}
+          />
+          <div
+            data-image-drop=""
+            onPaste={(e) => {
+              const files = imageFiles(e.clipboardData.files);
+              if (files.length === 0) return;
+              e.preventDefault();
+              void addAttachments(files);
+            }}
+            onDragOver={(e) => {
+              if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+            }}
+            onDrop={(e) => {
+              const files = imageFiles(e.dataTransfer.files);
+              if (files.length === 0) return;
+              e.preventDefault();
+              void addAttachments(files);
+            }}
+            className="rounded-[12px] border border-line bg-panel px-3 py-2 shadow-[0_2px_12px_var(--color-shadow)] transition-colors duration-150 focus-within:border-accent-line"
+          >
+            {attachments.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-2">
+                {attachments.map((a) => (
+                  <div key={a.id} className="group relative">
+                    <img
+                      src={a.preview}
+                      alt=""
+                      className="h-14 w-14 rounded-[8px] border border-line-soft object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(a.id)}
+                      aria-label="Remove image"
+                      className="absolute -right-1.5 -top-1.5 grid h-4 w-4 place-items-center rounded-full border border-line bg-elev text-ink-2 hover:text-ink"
+                    >
+                      <X size={9} weight="bold" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          <div className="flex items-end gap-2">
+            <button
+              type="button"
+              onClick={() => fileInput.current?.click()}
+              disabled={attachments.length >= MAX_ATTACHMENTS}
+              aria-label="Attach image"
+              title="Attach image (or paste / drop one)"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] text-ink-3 transition-colors duration-150 hover:bg-hover hover:text-ink-2 disabled:opacity-35"
+            >
+              <Paperclip size={16} />
+            </button>
             <textarea
               ref={inputRef}
               rows={1}
               value={input}
-              onChange={(e) => {
-                setInput(e.currentTarget.value);
-                const el = e.currentTarget;
-                el.style.height = "0px";
-                el.style.height = `${el.scrollHeight}px`;
-              }}
+              onChange={(e) => setInput(e.currentTarget.value)}
               onKeyDown={onComposerKey}
-              placeholder={`Message ${agentName}…`}
+              {...suggest.fieldProps}
+              placeholder={`Message ${agentName}… (@ to add a page or folder)`}
               aria-label={`Message ${agentName}`}
               spellCheck={false}
-              className="block max-h-[180px] w-full resize-none bg-transparent py-1 text-[14px] leading-[1.6] text-ink outline-none placeholder:text-ink-3"
+              className="block max-h-[220px] min-w-0 flex-1 resize-none overflow-y-auto break-words bg-transparent py-1 text-[14px] leading-[1.6] text-ink outline-none placeholder:text-ink-3"
             />
+            {suggest.menu}
             <ModelSelect chatId={chat?.id} placement="up" size="md" />
 
             {runningHere ? (
@@ -462,8 +631,8 @@ export function AgentsView() {
             ) : (
               <button
                 type="button"
-                onClick={submit}
-                disabled={!input.trim() || running}
+                onClick={() => void submit()}
+                disabled={!canSend}
                 aria-label="Send"
                 title="Send (Enter)"
                 className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] bg-accent text-on-accent transition-[background-color,transform] duration-150 ease-out-expo hover:bg-accent-2 active:scale-[0.97] disabled:opacity-35"
@@ -472,10 +641,13 @@ export function AgentsView() {
               </button>
             )}
           </div>
+          </div>
           <p className="mt-2 flex items-center justify-center gap-3 text-center font-mono text-[10.5px] text-ink-3">
             <span>
-              {agent === "claude" ? "claude code" : "devin"} · acp · edits
-              auto-approved, undo with ctrl z on the page
+              {AGENTS[agent].name.toLowerCase()} · acp · {approval === "auto"
+                ? "edits auto-approved"
+                : "you review edits"}
+              , undo with ctrl z on the page
             </span>
             {usage && usage.size > 0 && runningChatId === null && (
               <span>

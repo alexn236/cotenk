@@ -13,10 +13,12 @@ import {
   UploadSimple,
 } from "@phosphor-icons/react";
 import { useWorkspace } from "@/lib/store";
+import { requestSignIn, useAuth } from "@/lib/auth-store";
 import { useAgent } from "@/lib/agent-store";
 import { useMarket } from "@/lib/marketplace";
 import { askAgent } from "@/lib/agent-actions";
 import { toast } from "@/lib/toast";
+import { track } from "@/lib/analytics";
 import { DESKTOP_ONLY_MESSAGE, isDesktop } from "@/lib/workspace";
 import type { Doc } from "@/lib/types";
 import { DocPreview } from "@/components/editor/doc-preview";
@@ -34,14 +36,21 @@ function install(card: MarketCard) {
     .getState()
     .createDocWith({ title: card.title, content: card.content });
   if (card.listingId) useMarket.getState().countInstall(card.listingId);
+  track("template_installed", { official: card.official, interactive: card.interactive });
   toast(`Added “${card.title}” to your workspace`);
 }
 
 export function MarketView() {
   const tab = useWorkspace((s) => s.marketTab);
   const fetchListings = useMarket((s) => s.fetch);
+  const resetListings = useMarket((s) => s.reset);
   const loaded = useMarket((s) => s.loaded);
+  const userId = useAuth((s) => s.user?.id ?? null);
 
+  // Listings are per-session (RLS) — reload after sign-in or sign-out.
+  useEffect(() => {
+    resetListings();
+  }, [userId, resetListings]);
   useEffect(() => {
     if (!loaded) void fetchListings();
   }, [loaded, fetchListings]);
@@ -89,6 +98,7 @@ function Discover() {
   );
   const official = visible.filter((c) => c.official);
   const community = visible.filter((c) => !c.official);
+  const signedOut = useAuth((s) => s.status === "signedOut");
 
   return (
     <>
@@ -131,6 +141,17 @@ function Discover() {
               ? "No community pages match."
               : "No community pages yet — publish the first one from any page's menu."
         }
+        action={
+          signedOut
+            ? {
+                label: "Sign in",
+                run: () =>
+                  requestSignIn(
+                    "Community pages and publishing need an account. Your pages stay.",
+                  ),
+              }
+            : undefined
+        }
       />
 
       <PreviewModal card={preview} onClose={() => setPreview(null)} />
@@ -143,11 +164,13 @@ function Shelf({
   cards,
   onOpen,
   empty,
+  action,
 }: {
   label: string;
   cards: MarketCard[];
   onOpen: (c: MarketCard) => void;
   empty: string;
+  action?: { label: string; run: () => void };
 }) {
   return (
     <section className="mt-9">
@@ -158,9 +181,18 @@ function Shelf({
         </span>
       </div>
       {cards.length === 0 ? (
-        <p className="rounded-[10px] border border-dashed border-line px-4 py-5 text-[12.5px] text-ink-3">
-          {empty}
-        </p>
+        <div className="flex flex-col items-start gap-3 rounded-[10px] border border-dashed border-line px-4 py-5 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[12.5px] text-ink-3">{empty}</p>
+          {action && (
+            <button
+              type="button"
+              onClick={action.run}
+              className={btn.primary}
+            >
+              {action.label}
+            </button>
+          )}
+        </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {cards.map((c, i) => (
@@ -327,6 +359,7 @@ function MyListings() {
   const [publishing, setPublishing] = useState<Doc | null>(null);
   const [preview, setPreview] = useState<MarketCard | null>(null);
   const installs = cards.reduce((n, c) => n + (c.installs ?? 0), 0);
+  const signedOut = useAuth((s) => s.status === "signedOut");
 
   return (
     <>
@@ -336,20 +369,26 @@ function MyListings() {
             My listings
           </h1>
           <p className="mt-1.5 text-[13px] text-ink-3">
-            {cards.length} published · {installs} installs
+            {signedOut
+              ? "Sign in to publish pages and track installs."
+              : `${cards.length} published · ${installs} installs`}
           </p>
         </div>
         <button
           type="button"
-          onClick={() => setPicking(true)}
+          onClick={() =>
+            signedOut
+              ? requestSignIn("Publishing to the marketplace needs an account.")
+              : setPicking(true)
+          }
           className={btn.primary}
         >
           <UploadSimple size={13} />
-          Publish a page
+          {signedOut ? "Sign in to publish" : "Publish a page"}
         </button>
       </div>
 
-      {error && (
+      {error && !signedOut && (
         <p className="mt-6 rounded-[10px] border border-dashed border-line px-4 py-3 text-[12.5px] text-ink-3">
           {error}
         </p>
@@ -360,7 +399,7 @@ function MyListings() {
           <Card key={c.key} card={c} index={i} onOpen={() => setPreview(c)} />
         ))}
       </div>
-      {cards.length === 0 && !error && (
+      {cards.length === 0 && (!error || signedOut) && (
         <div className="mt-2 rounded-[10px] border border-dashed border-line px-6 py-10 text-center">
           <Storefront size={22} className="mx-auto text-ink-3" />
           <p className="mt-3 text-[13px] text-ink-2">

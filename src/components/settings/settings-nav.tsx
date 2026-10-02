@@ -1,8 +1,10 @@
 import { motion } from "motion/react";
 import {
+  Archive,
   CloudArrowUp,
   Info,
   Lightning,
+  PuzzlePiece,
   SunDim,
   UserCircle,
   type Icon,
@@ -20,6 +22,8 @@ const NAV_ITEMS: NavItem[] = [
   { id: "account", label: "Account", Icon: UserCircle },
   { id: "sync", label: "Sync", Icon: CloudArrowUp },
   { id: "agents", label: "Agents", Icon: Lightning },
+  { id: "extensions", label: "Agent customisation", Icon: PuzzlePiece },
+  { id: "data", label: "Data & backup", Icon: Archive },
   { id: "about", label: "About", Icon: Info },
 ];
 
