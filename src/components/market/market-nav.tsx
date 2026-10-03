@@ -3,7 +3,6 @@ import {
   Compass,
   Sparkle,
   SquaresFour,
-  UserCircle,
   type Icon,
 } from "@phosphor-icons/react";
 import { useWorkspace, type MarketTab } from "@/lib/store";
@@ -13,7 +12,6 @@ import { useMarketCards } from "./use-market-cards";
 
 const TABS: { id: MarketTab; label: string; Icon: Icon }[] = [
   { id: "discover", label: "Discover", Icon: Compass },
-  { id: "mine", label: "My listings", Icon: UserCircle },
   { id: "build", label: "Build with AI", Icon: Sparkle },
 ];
 
@@ -22,7 +20,7 @@ const SECTION_LABEL =
 const INDICATOR =
   "absolute inset-y-0 left-0 my-auto h-3.5 w-[2px] rounded-full bg-accent";
 
-/** Sidebar for the marketplace: tabs plus category filters. */
+/** Sidebar for the template gallery: tabs plus category filters. */
 export function MarketNav() {
   const tab = useWorkspace((s) => s.marketTab);
   const setTab = useWorkspace((s) => s.setMarketTab);
@@ -41,7 +39,7 @@ export function MarketNav() {
   return (
     <div>
       <section>
-        <div className={SECTION_LABEL}>Marketplace</div>
+        <div className={SECTION_LABEL}>Templates</div>
         {TABS.map(({ id, label, Icon: TabIcon }) => (
           <button
             key={id}
@@ -83,10 +81,6 @@ export function MarketNav() {
           ))}
         </section>
       )}
-
-      <p className="mt-4 px-2 text-[11.5px] leading-relaxed text-ink-3">
-        Publish any page from its ⋯ menu. Paid listings are coming soon.
-      </p>
     </div>
   );
 }

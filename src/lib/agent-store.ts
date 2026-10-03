@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { getSupabase } from "./supabase";
 import {
   acpClient,
   onAgentCommands,
@@ -9,7 +8,7 @@ import {
 import type { ModelOption } from "./agent-models";
 import { workspacePreamble } from "./agent-context";
 import { AGENT_KINDS, isAgentKind, type AgentKind } from "./agents";
-import { setAgentRunning, track } from "./analytics";
+import { setAgentRunning } from "./activity";
 import { newId } from "./ids";
 import { blobToBase64 } from "./images";
 
@@ -151,311 +150,79 @@ export const hasAgentPreference = () => isAgentKind(readPref(AGENT_KEY));
 const perAgent = <T>(fn: (a: AgentKind) => T): PerAgent<T> =>
   Object.fromEntries(AGENT_KINDS.map((a) => [a, fn(a)])) as PerAgent<T>;
 
-/* ---------- supabase persistence ---------- */
+/* ---------- local persistence ---------- */
 
-/** Cleared when the `agent` column migration hasn't been applied yet. */
-let hasAgentColumn = true;
-/** Pushes whatever is pending right now (set while a sync runs). */
-let flushActive: (() => Promise<void>) | null = null;
+/** Chats and projects live on this device (localStorage). */
+const CHATS_KEY = "cotenk-agent-chats";
 
-type ChatRow = {
-  id: string;
-  project_id: string | null;
-  agent?: string | null;
-  title: string;
-  model: string;
-  pinned: boolean;
-  messages: AgentMsg[];
-  acp_session_id: string | null;
-  updated_at: number | string;
-};
+type StoredChats = { chats: AgentChat[]; projects: AgentProject[] };
 
-const toChat = (r: ChatRow): AgentChat => ({
-  id: r.id,
-  projectId: r.project_id,
-  // Chats from before Claude Code support were all Devin chats.
-  agent: isAgentKind(r.agent) ? r.agent : "devin",
-  title: r.title,
-  model: r.model ?? "",
-  pinned: r.pinned,
-  messages: Array.isArray(r.messages)
-    ? r.messages.map((m) => ({ ...m, streaming: false }))
-    : [],
-  acpSessionId: r.acp_session_id ?? null,
-  updatedAt: Number(r.updated_at) || Date.now(),
-});
-
-const toChatRow = (c: AgentChat, userId: string) => ({
-  id: c.id,
-  user_id: userId,
-  project_id: c.projectId,
-  ...(hasAgentColumn ? { agent: c.agent } : {}),
-  title: c.title,
-  model: c.model,
-  pinned: c.pinned,
-  messages: c.messages.map((m) => ({
-    id: m.id,
-    role: m.role,
-    text: m.text,
-    ...(m.status ? { status: m.status } : {}),
-    ...(m.images?.length ? { images: m.images } : {}),
-  })),
-  acp_session_id: c.acpSessionId,
-  updated_at: c.updatedAt,
-});
-
-/** The chat tables don't exist (migration pending) — not worth retrying. */
-const missingTable = (e: { code?: string; message?: string } | null) =>
-  !!e &&
-  (e.code === "42P01" ||
-    e.code === "PGRST205" ||
-    /does not exist|schema cache/i.test(e.message ?? ""));
-
-/** Pushes pending chat changes now (before sign-out). */
-export async function flushAgentSync(): Promise<void> {
-  await flushActive?.();
+function loadChats(): StoredChats {
+  try {
+    const raw = localStorage.getItem(CHATS_KEY);
+    const v = raw ? (JSON.parse(raw) as Partial<StoredChats>) : null;
+    const chats = Array.isArray(v?.chats) ? v.chats : [];
+    return {
+      chats: chats
+        .filter((c) => c && typeof c.id === "string" && isAgentKind(c.agent))
+        .map((c) => ({
+          ...c,
+          messages: Array.isArray(c.messages)
+            ? c.messages.map((m) => ({ ...m, streaming: false }))
+            : [],
+        })),
+      projects: Array.isArray(v?.projects) ? v.projects : [],
+    };
+  } catch {
+    return { chats: [], projects: [] };
+  }
 }
 
-/**
- * Chat sync for one signed-in user — same rules as the page sync:
- *
- *  - Nothing is pushed before the first pull landed (retried until it
- *    does). An offline start used to push an empty list and delete
- *    every chat on the server.
- *  - Only chats/projects that changed since the last push are uploaded
- *    (it used to re-upload every chat with its full history).
- *  - Only rows deleted here are deleted remotely — "missing locally" is
- *    not a delete. Chats made on another device used to vanish as soon
- *    as this one saved anything.
- */
-export function initAgentSync(userId: string): () => void {
-  const sb = getSupabase();
-  let disposed = false;
-  let pulled = false;
-  let pullFailures = 0;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let retryTimer: ReturnType<typeof setTimeout> | null = null;
-  let inflight: Promise<void> | null = null;
-  let dirty = false;
-  let applyingRemote = false;
-  /** Objects that match the server (chats/projects are immutable). */
-  const pushedChats = new WeakSet<AgentChat>();
-  const pushedProjects = new WeakSet<AgentProject>();
-  /** Removed locally, not yet deleted on the server. */
-  const deletedChats = new Set<string>();
-  const deletedProjects = new Set<string>();
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const pushOnce = async () => {
-    const { chats, projects } = useAgent.getState();
-    const projectRows = projects.filter((p) => !pushedProjects.has(p));
-    const chatRows = chats.filter((c) => !pushedChats.has(c));
-    const chatDeletes = [...deletedChats];
-    const projectDeletes = [...deletedProjects];
-    // Projects first (chats reference them), project deletes last.
-    if (projectRows.length > 0) {
-      const { error } = await sb.from("agent_projects").upsert(
-        projectRows.map((p) => ({ id: p.id, user_id: userId, name: p.name })),
-      );
-      if (error) throw error;
-      projectRows.forEach((p) => pushedProjects.add(p));
-    }
-    if (chatRows.length > 0) {
-      const rows = chatRows.map((c) => toChatRow(c, userId));
-      let { error } = await sb.from("agent_chats").upsert(rows);
-      // Migration 20260925 not applied yet — keep saving without it.
-      if (error && hasAgentColumn && /agent/.test(error.message)) {
-        hasAgentColumn = false;
-        ({ error } = await sb
-          .from("agent_chats")
-          .upsert(rows.map(({ agent: _agent, ...rest }) => rest)));
-      }
-      if (error) throw error;
-      chatRows.forEach((c) => pushedChats.add(c));
-    }
-    if (chatDeletes.length > 0) {
-      const { error } = await sb
-        .from("agent_chats")
-        .delete()
-        .in("id", chatDeletes);
-      if (error) throw error;
-      chatDeletes.forEach((id) => deletedChats.delete(id));
-    }
-    if (projectDeletes.length > 0) {
-      const { error } = await sb
-        .from("agent_projects")
-        .delete()
-        .in("id", projectDeletes);
-      if (error) throw error;
-      projectDeletes.forEach((id) => deletedProjects.delete(id));
-    }
-  };
-
-  const flush = (): Promise<void> => {
-    if (!pulled || disposed) return Promise.resolve();
-    if (inflight) {
-      dirty = true;
-      return inflight;
-    }
-    dirty = false;
-    inflight = (async () => {
-      try {
-        await pushOnce();
-      } catch {
-        // Pending rows stay pending — try again later.
-        if (!disposed) {
-          if (timer) clearTimeout(timer);
-          timer = setTimeout(() => void flush(), 5000);
-        }
-      } finally {
-        inflight = null;
-      }
-      if (dirty && !disposed) await flush();
-    })();
-    return inflight;
-  };
-
-  const schedule = () => {
-    if (disposed || !pulled) return;
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => void flush(), 800);
-  };
-
-  flushActive = async () => {
-    if (timer) {
-      clearTimeout(timer);
-      timer = null;
-    }
-    await flush();
-  };
-
-  const pull = async () => {
-    const [p, c] = await Promise.all([
-      sb.from("agent_projects").select("id, name").order("created_at"),
-      // `*` so the pull works with and without the `agent` column.
-      sb
-        .from("agent_chats")
-        .select("*")
-        .order("updated_at", { ascending: false }),
-    ]);
-    if (disposed) return;
-    const error = p.error ?? c.error;
-    if (error) {
-      if (missingTable(error)) {
-        // Tables missing (migration pending) — chats stay in memory.
-        useAgent.setState({ hydrated: true });
-        return;
-      }
-      pullFailures += 1;
-      retryTimer = setTimeout(
-        () => void pull(),
-        Math.min(60_000, 3000 * 2 ** Math.min(pullFailures, 5)),
-      );
-      return;
-    }
-    const rows = (c.data ?? []) as unknown as ChatRow[];
-    hasAgentColumn = rows.length === 0 || "agent" in rows[0];
-    const remoteChats = rows.map(toChat);
-    const remoteProjects: AgentProject[] = (p.data ?? []).map((r) => ({
-      id: r.id as string,
-      name: r.name as string,
-    }));
-    remoteChats.forEach((x) => pushedChats.add(x));
-    remoteProjects.forEach((x) => pushedProjects.add(x));
-
-    // Chats started while the pull was in flight are kept (and pushed);
-    // a local copy that is newer than the server's wins.
-    const st = useAgent.getState();
-    const localById = new Map(st.chats.map((x) => [x.id, x]));
-    const remoteIds = new Set(remoteChats.map((x) => x.id));
-    const chats = [
-      ...st.chats.filter((x) => !remoteIds.has(x.id)),
-      ...remoteChats.map((r) => {
-        const l = localById.get(r.id);
-        return l && l.updatedAt > r.updatedAt ? l : r;
-      }),
-    ];
-    const remoteProjectIds = new Set(remoteProjects.map((x) => x.id));
-    const projects = [
-      ...remoteProjects,
-      ...st.projects.filter((x) => !remoteProjectIds.has(x.id)),
-    ];
-    applyingRemote = true;
-    try {
-      useAgent.setState({
-        projects,
-        chats,
-        activeChatId: st.activeChatId ?? chats[0]?.id ?? null,
-        hydrated: true,
-      });
-    } finally {
-      applyingRemote = false;
-    }
-    pulled = true;
-    await flush();
-  };
-
-  const unsub = useAgent.subscribe((s, prev) => {
-    if (s.chats === prev.chats && s.projects === prev.projects) return;
-    if (!applyingRemote) {
-      if (s.chats !== prev.chats) {
-        const now = new Set(s.chats.map((x) => x.id));
-        for (const x of prev.chats) if (!now.has(x.id)) deletedChats.add(x.id);
-        for (const id of now) deletedChats.delete(id);
-      }
-      if (s.projects !== prev.projects) {
-        const now = new Set(s.projects.map((x) => x.id));
-        for (const x of prev.projects) {
-          if (!now.has(x.id)) deletedProjects.add(x.id);
-        }
-        for (const id of now) deletedProjects.delete(id);
-      }
-    }
-    schedule();
-  });
-
-  const onOnline = () => {
-    if (!pulled) {
-      if (retryTimer) clearTimeout(retryTimer);
-      void pull();
-    } else {
-      void flush();
-    }
-  };
-  window.addEventListener("online", onOnline);
-
-  void pull();
-  return () => {
-    disposed = true;
-    unsub();
-    window.removeEventListener("online", onOnline);
-    if (timer) clearTimeout(timer);
-    if (retryTimer) clearTimeout(retryTimer);
-    flushActive = null;
-  };
+function saveChats() {
+  saveTimer = null;
+  const { chats, projects } = useAgent.getState();
+  const slim = chats.map((c) => ({
+    ...c,
+    messages: c.messages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      text: m.text,
+      ...(m.status ? { status: m.status } : {}),
+      ...(m.images?.length ? { images: m.images } : {}),
+    })),
+  }));
+  try {
+    localStorage.setItem(CHATS_KEY, JSON.stringify({ chats: slim, projects }));
+  } catch {
+    /* storage unavailable or full */
+  }
 }
 
 /* ---------- store ---------- */
 
 const storedAgent = readPref(AGENT_KEY);
+const stored = typeof window !== "undefined" ? loadChats() : { chats: [], projects: [] };
 
 export const useAgent = create<AgentState>()((set, get) => ({
   status: "idle",
-  chats: [],
-  projects: [],
-  activeChatId: null,
+  chats: stored.chats,
+  projects: stored.projects,
+  activeChatId: stored.chats[0]?.id ?? null,
   runningChatId: null,
   models: perAgent(() => []),
   commands: perAgent(() => []),
   currentModel: perAgent(() => null),
-  // Fresh installs start on the built-in agent; setup moves the default
-  // to whichever agent gets connected (agent-setup.ts autoPickDefault).
-  defaultAgent: isAgentKind(storedAgent) ? storedAgent : "cotenk",
+  // Fresh installs start on Claude Code; setup moves the default to
+  // whichever agent gets connected (agent-setup.ts autoPickDefault).
+  defaultAgent: isAgentKind(storedAgent) ? storedAgent : "claude",
   defaultModels: perAgent((a) => readPref(modelKey(a)) ?? ""),
   thought: null,
   usage: null,
   error: null,
   errorAgent: null,
-  hydrated: false,
+  hydrated: true,
 
   refresh: async (agent) => {
     const st = get();
@@ -574,7 +341,6 @@ export const useAgent = create<AgentState>()((set, get) => ({
 
     running = { chatId, agent };
     setAgentRunning(true);
-    let ok = false;
     try {
       let streamErr: string | null = null;
       // The first turn of every chat carries the workspace conventions,
@@ -643,7 +409,6 @@ export const useAgent = create<AgentState>()((set, get) => ({
         wireImages,
       );
       if (streamErr) throw new Error(streamErr);
-      ok = true;
       set({ status: "ready", thought: null });
     } catch (e) {
       set({
@@ -655,7 +420,6 @@ export const useAgent = create<AgentState>()((set, get) => ({
     } finally {
       running = null;
       setAgentRunning(false);
-      track("agent_turn_completed", { agent, ok, first_turn: firstTurn });
       patchChat((c) => ({
         ...c,
         updatedAt: Date.now(),
@@ -795,3 +559,19 @@ export function isAgentCommand(text: string, commands: AgentCommand[]): boolean 
 onAgentCommands((kind, cmds) =>
   useAgent.setState((s) => ({ commands: { ...s.commands, [kind]: cmds } })),
 );
+
+// Debounced: a streaming turn changes the chat many times a second.
+useAgent.subscribe((s, prev) => {
+  if (s.chats === prev.chats && s.projects === prev.projects) return;
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveChats, 600);
+});
+
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", () => {
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveChats();
+    }
+  });
+}

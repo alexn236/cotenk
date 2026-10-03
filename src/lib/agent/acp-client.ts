@@ -9,16 +9,10 @@ import {
 import type { ModelOption } from "../agent-models";
 import { AGENTS, type AgentKind } from "../agents";
 import {
-  NO_KEY_MESSAGE,
   prepareAgent,
   sessionExtensions,
   type SessionExtensions,
 } from "./extensions-runtime";
-import {
-  cleanModelName,
-  cotenkAgentReady,
-  preferredModel,
-} from "../cotenk-agent";
 import {
   cancelPermissions,
   requestPermission,
@@ -27,8 +21,8 @@ import {
 } from "../agent-permissions";
 
 /**
- * ACP (Agent Client Protocol) client for the local agents — `devin acp`,
- * the Claude Code ACP adapter and `opencode acp` (the CoTenk Agent). Speaks newline-delimited JSON-RPC 2.0.
+ * ACP (Agent Client Protocol) client for the local agents — `devin acp`
+ * and the Claude Code ACP adapter. Speaks newline-delimited JSON-RPC 2.0.
  * The child processes are owned by the Rust side (src-tauri); this class
  * keeps all session, config-option and event-mapping logic in one place.
  * One client (and process) per agent kind, one ACP session per chat
@@ -162,11 +156,8 @@ class AcpClient {
 
   private async start(): Promise<void> {
     if (!isDesktop()) throw new Error(DESKTOP_ONLY_MESSAGE);
-    // Devin authenticates over ACP with the CLI's stored key, the CoTenk
-    // Agent gets its key in the environment; Claude reuses its CLI login.
-    if (this.kind === "cotenk" && !cotenkAgentReady()) {
-      throw new Error(NO_KEY_MESSAGE);
-    }
+    // Devin authenticates over ACP with the CLI's stored key; Claude
+    // reuses its CLI login.
     let apiKey: string | null = null;
     if (this.kind === "devin") {
       apiKey =
@@ -180,13 +171,9 @@ class AcpClient {
     // Listeners must be attached before the process emits anything.
     await ensureListening();
     this.cwd = await resolveWorkspaceDir();
-    // Skills/MCP from Settings → Skills & MCP; a broken extension must
-    // not keep the agent from starting. The CoTenk Agent's key and
-    // config come from there too, so it can't start without them.
-    const env = await prepareAgent(this.kind, this.cwd).catch((e) => {
-      if (this.kind === "cotenk") throw e;
-      return {};
-    });
+    // Skills/MCP from Settings → Agent customisation; a broken extension
+    // must not keep the agent from starting.
+    const env = await prepareAgent(this.kind, this.cwd).catch(() => ({}));
     await invoke("acp_spawn", { agent: this.kind, dir: this.cwd, env });
     this.running = true;
 
@@ -259,9 +246,7 @@ class AcpClient {
   private explain(err: { code: number; message: string }): string {
     // -32000 is ACP's authRequired.
     if (err.code === -32000 || /auth(entication)? required/i.test(err.message)) {
-      return this.kind === "cotenk"
-        ? "The CoTenk Agent's API key was rejected — check it in Settings → Agents."
-        : `${this.label} is not signed in — connect it in Settings → Agents.`;
+      return `${this.label} is not signed in — connect it in Settings → Agents.`;
     }
     return err.message;
   }
@@ -434,7 +419,7 @@ class AcpClient {
     if (model?.options?.length) {
       this.models = model.options.map((o) => ({
         value: o.value,
-        name: this.kind === "cotenk" ? cleanModelName(o.name) : o.name,
+        name: o.name,
         supportsImages:
           o._meta?.["cognition.ai/supportsImages"] === true,
       }));
@@ -482,9 +467,6 @@ class AcpClient {
     })) as { sessionId: string; configOptions?: ConfigOption[] };
     this.sessions.set(chatKey, res.sessionId);
     this.captureModels(res.configOptions);
-    if (!model && this.kind === "cotenk") {
-      await this.applyCotenkDefaults(res.sessionId, res.configOptions);
-    }
     if (model) {
       try {
         await this.setConfig(res.sessionId, "model", model);
@@ -494,30 +476,6 @@ class AcpClient {
       }
     }
     return res.sessionId;
-  }
-
-  /**
-   * OpenCode starts on whatever model sorts first, sometimes at low
-   * effort; use the provider's preferred model, and medium effort over
-   * low. Effort levels depend on the model, so read them after the switch.
-   */
-  private async applyCotenkDefaults(sessionId: string, options?: ConfigOption[]) {
-    const pref = preferredModel(this.models);
-    try {
-      if (pref && pref !== this.currentModel) {
-        options = (await this.setConfig(sessionId, "model", pref)) ?? options;
-        this.currentModel = pref;
-      }
-      const effort = options?.find((o) => o.id === "effort");
-      if (
-        effort?.currentValue === "low" &&
-        effort.options?.some((o) => o.value === "medium")
-      ) {
-        await this.setConfig(sessionId, "effort", "medium");
-      }
-    } catch {
-      /* keep the agent's defaults */
-    }
   }
 
   /** Returns the session's config options after the change, if sent. */
@@ -559,13 +517,7 @@ class AcpClient {
     }
     const sessionId = await this.ensureSession(chatKey, model);
     this.busy = true;
-    let answered = false;
-    const listener = (e: AgentEvent) => {
-      if (e.type === "text" || e.type === "thought" || e.type === "tool") {
-        answered = true;
-      }
-      onEvent(e);
-    };
+    const listener = (e: AgentEvent) => onEvent(e);
     this.listeners.add(listener);
     try {
       const res = (await this.request("session/prompt", {
@@ -575,18 +527,6 @@ class AcpClient {
           ...images.map((i) => ({ type: "image", ...i })),
         ],
       })) as { stopReason?: string; usage?: { totalTokens?: number } };
-      // OpenCode swallows provider errors (bad key, no credit): the turn
-      // just ends with nothing said and no tokens used.
-      if (
-        this.kind === "cotenk" &&
-        !answered &&
-        res?.stopReason === "end_turn" &&
-        res.usage?.totalTokens === 0
-      ) {
-        throw new Error(
-          "The CoTenk Agent got no answer from your provider — the API key may be invalid or out of credit, or the model unavailable. Check it in Settings → Agents.",
-        );
-      }
       onEvent({ type: "done", stopReason: res?.stopReason ?? "end_turn" });
     } finally {
       this.busy = false;

@@ -1,30 +1,23 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import {
   CheckCircle,
   DownloadSimple,
-  FileText,
   Lightning,
   MagnifyingGlass,
   Plus,
   Sparkle,
   Storefront,
-  Trash,
-  UploadSimple,
 } from "@phosphor-icons/react";
 import { useWorkspace } from "@/lib/store";
-import { requestSignIn, useAuth } from "@/lib/auth-store";
 import { useAgent } from "@/lib/agent-store";
 import { useMarket } from "@/lib/marketplace";
 import { askAgent } from "@/lib/agent-actions";
 import { toast } from "@/lib/toast";
-import { track } from "@/lib/analytics";
 import { DESKTOP_ONLY_MESSAGE, isDesktop } from "@/lib/workspace";
-import type { Doc } from "@/lib/types";
 import { DocPreview } from "@/components/editor/doc-preview";
 import { Modal } from "@/components/ui/modal";
 import { btn } from "@/components/ui/styles";
-import { PublishDialog } from "./publish-dialog";
 import { ModelSelect } from "@/components/agents/model-select";
 import { useMarketCards, type MarketCard } from "./use-market-cards";
 
@@ -35,44 +28,23 @@ function install(card: MarketCard) {
   useWorkspace
     .getState()
     .createDocWith({ title: card.title, content: card.content });
-  if (card.listingId) useMarket.getState().countInstall(card.listingId);
-  track("template_installed", { official: card.official, interactive: card.interactive });
   toast(`Added “${card.title}” to your workspace`);
 }
 
 export function MarketView() {
   const tab = useWorkspace((s) => s.marketTab);
-  const fetchListings = useMarket((s) => s.fetch);
-  const resetListings = useMarket((s) => s.reset);
-  const loaded = useMarket((s) => s.loaded);
-  const userId = useAuth((s) => s.user?.id ?? null);
-
-  // Listings are per-session (RLS) — reload after sign-in or sign-out.
-  useEffect(() => {
-    resetListings();
-  }, [userId, resetListings]);
-  useEffect(() => {
-    if (!loaded) void fetchListings();
-  }, [loaded, fetchListings]);
-
-  const title =
-    tab === "discover"
-      ? "Discover"
-      : tab === "mine"
-        ? "My listings"
-        : "Build with AI";
+  const title = tab === "discover" ? "Discover" : "Build with AI";
 
   return (
     <div className="relative flex h-dvh min-w-0 flex-1 flex-col bg-canvas">
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-line-soft px-4">
         <Storefront size={15} className="text-ink-3" />
-        <span className="text-[13px] font-semibold text-ink">Marketplace</span>
+        <span className="text-[13px] font-semibold text-ink">Templates</span>
         <span className="text-[12.5px] text-ink-3">/ {title}</span>
       </header>
       <div className="flex-1 overflow-y-auto">
         <div className="@container mx-auto w-full max-w-[920px] px-6 py-10 md:px-12">
           {tab === "discover" && <Discover />}
-          {tab === "mine" && <MyListings />}
           {tab === "build" && <BuildWithAi />}
         </div>
       </div>
@@ -85,7 +57,6 @@ export function MarketView() {
 function Discover() {
   const cards = useMarketCards();
   const category = useMarket((s) => s.category);
-  const error = useMarket((s) => s.error);
   const [query, setQuery] = useState("");
   const [preview, setPreview] = useState<MarketCard | null>(null);
 
@@ -96,9 +67,6 @@ function Discover() {
       (!q ||
         `${c.title} ${c.description} ${c.author}`.toLowerCase().includes(q)),
   );
-  const official = visible.filter((c) => c.official);
-  const community = visible.filter((c) => !c.official);
-  const signedOut = useAuth((s) => s.status === "signedOut");
 
   return (
     <>
@@ -108,8 +76,8 @@ function Discover() {
             Pages that work out of the box
           </h1>
           <p className="mt-1.5 max-w-[520px] text-[13px] leading-relaxed text-ink-3">
-            Templates, dashboards and interactive tools built by the CoTenk
-            community and their agents. Install a copy, then make it yours.
+            Templates, dashboards and interactive tools. Add a copy to your
+            workspace, then make it yours.
           </p>
         </div>
         <div className="flex h-8 w-full shrink-0 items-center gap-2 rounded-[8px] border border-line-soft bg-panel px-2.5 @2xl:w-[240px]">
@@ -125,33 +93,10 @@ function Discover() {
       </div>
 
       <Shelf
-        label="Official"
-        cards={official}
+        label="Templates"
+        cards={visible}
         onOpen={setPreview}
-        empty="No official templates match."
-      />
-      <Shelf
-        label="Community"
-        cards={community}
-        onOpen={setPreview}
-        empty={
-          error
-            ? error
-            : q || category !== "All"
-              ? "No community pages match."
-              : "No community pages yet — publish the first one from any page's menu."
-        }
-        action={
-          signedOut
-            ? {
-                label: "Sign in",
-                run: () =>
-                  requestSignIn(
-                    "Community pages and publishing need an account. Your pages stay.",
-                  ),
-              }
-            : undefined
-        }
+        empty="No templates match."
       />
 
       <PreviewModal card={preview} onClose={() => setPreview(null)} />
@@ -164,13 +109,11 @@ function Shelf({
   cards,
   onOpen,
   empty,
-  action,
 }: {
   label: string;
   cards: MarketCard[];
   onOpen: (c: MarketCard) => void;
   empty: string;
-  action?: { label: string; run: () => void };
 }) {
   return (
     <section className="mt-9">
@@ -181,17 +124,8 @@ function Shelf({
         </span>
       </div>
       {cards.length === 0 ? (
-        <div className="flex flex-col items-start gap-3 rounded-[10px] border border-dashed border-line px-4 py-5 @xl:flex-row @xl:items-center @xl:justify-between">
+        <div className="rounded-[10px] border border-dashed border-line px-4 py-5">
           <p className="text-[12.5px] text-ink-3">{empty}</p>
-          {action && (
-            <button
-              type="button"
-              onClick={action.run}
-              className={btn.primary}
-            >
-              {action.label}
-            </button>
-          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 @lg:grid-cols-2 @3xl:grid-cols-3">
@@ -246,25 +180,15 @@ function Card({
       </button>
       <div className="mt-4 flex items-center gap-2 text-[11.5px] text-ink-3">
         <span className="flex min-w-0 items-center gap-1">
-          {card.official && (
-            <CheckCircle size={12} weight="fill" className="shrink-0 text-accent" />
-          )}
+          <CheckCircle size={12} weight="fill" className="shrink-0 text-accent" />
           <span className="truncate">{card.author}</span>
-        </span>
-        {card.installs !== null && (
-          <span className="shrink-0 whitespace-nowrap font-mono">
-            · {card.installs} installs
-          </span>
-        )}
-        <span className="ml-auto shrink-0 whitespace-nowrap font-mono">
-          {card.priceCents > 0 ? `€${(card.priceCents / 100).toFixed(2)}` : "Free"}
         </span>
         <button
           type="button"
           onClick={() => install(card)}
           aria-label={`Use ${card.title}`}
           title="Use template"
-          className="grid h-7 w-7 shrink-0 place-items-center rounded-[6px] border border-line bg-panel-2 text-ink-2 transition-colors duration-150 hover:bg-accent hover:text-on-accent"
+          className="ml-auto grid h-7 w-7 shrink-0 place-items-center rounded-[6px] border border-line bg-panel-2 text-ink-2 transition-colors duration-150 hover:bg-accent hover:text-on-accent"
         >
           <DownloadSimple size={13} />
         </button>
@@ -280,7 +204,6 @@ function PreviewModal({
   card: MarketCard | null;
   onClose: () => void;
 }) {
-  const unpublish = useMarket((s) => s.unpublish);
   return (
     <Modal
       open={card !== null}
@@ -299,21 +222,6 @@ function PreviewModal({
       footer={
         card && (
           <>
-            {card.mine && card.listingId && (
-              <button
-                type="button"
-                className={`${btn.secondary} mr-auto hover:text-danger`}
-                onClick={async () => {
-                  const err = await unpublish(card.listingId!);
-                  if (err) toast(err, { tone: "error" });
-                  else toast("Listing removed");
-                  onClose();
-                }}
-              >
-                <Trash size={13} />
-                Unpublish
-              </button>
-            )}
             <button type="button" onClick={onClose} className={btn.secondary}>
               Close
             </button>
@@ -348,98 +256,6 @@ function PreviewModal({
         </div>
       )}
     </Modal>
-  );
-}
-
-/* ---------- my listings ---------- */
-
-function MyListings() {
-  const cards = useMarketCards().filter((c) => c.mine);
-  const error = useMarket((s) => s.error);
-  const docs = useWorkspace((s) => s.docs);
-  const [picking, setPicking] = useState(false);
-  const [publishing, setPublishing] = useState<Doc | null>(null);
-  const [preview, setPreview] = useState<MarketCard | null>(null);
-  const installs = cards.reduce((n, c) => n + (c.installs ?? 0), 0);
-  const signedOut = useAuth((s) => s.status === "signedOut");
-
-  return (
-    <>
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <h1 className="text-[24px] font-semibold tracking-[-0.01em] text-ink">
-            My listings
-          </h1>
-          <p className="mt-1.5 text-[13px] text-ink-3">
-            {signedOut
-              ? "Sign in to publish pages and track installs."
-              : `${cards.length} published · ${installs} installs`}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() =>
-            signedOut
-              ? requestSignIn("Publishing to the marketplace needs an account.")
-              : setPicking(true)
-          }
-          className={btn.primary}
-        >
-          <UploadSimple size={13} />
-          {signedOut ? "Sign in to publish" : "Publish a page"}
-        </button>
-      </div>
-
-      {error && !signedOut && (
-        <p className="mt-6 rounded-[10px] border border-dashed border-line px-4 py-3 text-[12.5px] text-ink-3">
-          {error}
-        </p>
-      )}
-
-      <div className="mt-8 grid grid-cols-1 gap-3 @lg:grid-cols-2 @3xl:grid-cols-3">
-        {cards.map((c, i) => (
-          <Card key={c.key} card={c} index={i} onOpen={() => setPreview(c)} />
-        ))}
-      </div>
-      {cards.length === 0 && (!error || signedOut) && (
-        <div className="mt-2 rounded-[10px] border border-dashed border-line px-6 py-10 text-center">
-          <Storefront size={22} className="mx-auto text-ink-3" />
-          <p className="mt-3 text-[13px] text-ink-2">
-            Share what works for you
-          </p>
-          <p className="mx-auto mt-1 max-w-[380px] text-[12.5px] leading-relaxed text-ink-3">
-            Publish any page — a planning ritual, a dashboard your agent
-            built — and others can install a copy in one click.
-          </p>
-        </div>
-      )}
-
-      <Modal
-        open={picking}
-        onClose={() => setPicking(false)}
-        title="Choose a page to publish"
-        width={440}
-      >
-        <div className="p-1.5">
-          {docs.map((d) => (
-            <button
-              key={d.id}
-              type="button"
-              onClick={() => {
-                setPicking(false);
-                setPublishing(d);
-              }}
-              className="flex h-9 w-full items-center gap-2.5 rounded-[8px] px-2.5 text-left text-[13px] text-ink-2 transition-colors duration-100 hover:bg-hover hover:text-ink"
-            >
-              <FileText size={15} className="shrink-0 text-ink-3" />
-              <span className="truncate">{d.title.trim() || "Untitled"}</span>
-            </button>
-          ))}
-        </div>
-      </Modal>
-      <PublishDialog doc={publishing} onClose={() => setPublishing(null)} />
-      <PreviewModal card={preview} onClose={() => setPreview(null)} />
-    </>
   );
 }
 
@@ -490,7 +306,7 @@ function BuildWithAi() {
         <p className="mt-1.5 max-w-[460px] text-[13px] leading-relaxed text-ink-3">
           Your agent builds the page right inside your workspace — markdown,
           tasks and interactive widgets. It shows up in Documents when done,
-          ready to edit, share or publish.
+          ready to edit.
         </p>
       </div>
 

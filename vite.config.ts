@@ -23,7 +23,6 @@ export default defineConfig({
         // views and the importer are split via dynamic import().
         codeSplitting: {
           groups: [
-            { name: "supabase", test: /node_modules[\\/]@supabase[\\/]/ },
             {
               name: "markdown",
               test: /node_modules[\\/](react-markdown|remark-|micromark|mdast-|unified|vfile|hast-|unist-|property-information|decode-named|character-|space-separated|comma-separated|html-url|trim-lines|devlop|bail|ccount|zwitch|longest-streak|markdown-table|escape-string|is-plain-obj|trough|estree-util|style-to|inline-style)/,

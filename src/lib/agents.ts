@@ -1,11 +1,10 @@
 /**
  * The local ACP agents CoTenk can host. Each runs as its own subprocess
- * in the workspace folder (see src-tauri); chats are bound to one agent.
- * "cotenk" is the built-in one — OpenCode with the person's own API key
- * (see cotenk-agent.ts); the others bring their own CLI login.
+ * in the workspace folder (see src-tauri) with its own CLI login; chats
+ * are bound to one agent.
  */
 
-export type AgentKind = "cotenk" | "devin" | "claude";
+export type AgentKind = "devin" | "claude";
 
 export type AgentInfo = {
   id: AgentKind;
@@ -17,12 +16,6 @@ export type AgentInfo = {
 };
 
 export const AGENTS: Record<AgentKind, AgentInfo> = {
-  cotenk: {
-    id: "cotenk",
-    name: "CoTenk Agent",
-    handle: "cotenk",
-    blurb: "Built in · bring your own API key (Anthropic, OpenAI, …)",
-  },
   claude: {
     id: "claude",
     name: "Claude Code",
@@ -37,7 +30,7 @@ export const AGENTS: Record<AgentKind, AgentInfo> = {
   },
 };
 
-export const AGENT_KINDS: AgentKind[] = ["cotenk", "claude", "devin"];
+export const AGENT_KINDS: AgentKind[] = ["claude", "devin"];
 
 export const isAgentKind = (v: unknown): v is AgentKind =>
   typeof v === "string" && (AGENT_KINDS as string[]).includes(v);

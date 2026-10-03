@@ -13,14 +13,12 @@ import {
   MagnifyingGlass,
   MoonStars,
   Plus,
-  SignIn,
   Sparkle,
   Storefront,
   type Icon,
 } from "@phosphor-icons/react";
 import { openWelcomePage, useWorkspace } from "@/lib/store";
 import { HTML_PAGE_TEMPLATE } from "@/lib/html-page";
-import { requestSignIn, useAuth } from "@/lib/auth-store";
 import type { Doc, Folder } from "@/lib/types";
 import { askAgent } from "@/lib/agent-actions";
 import { useIsomorphicLayoutEffect } from "@/components/editor/utils";
@@ -204,22 +202,6 @@ function buildItems(
       icon: Hand,
       run: go(openWelcomePage),
     },
-    ...(useAuth.getState().status === "signedOut"
-      ? [
-          {
-            id: "sign-in",
-            group: "Actions" as const,
-            label: "Sign in",
-            hint: "Sync across devices, publish to the marketplace",
-            icon: SignIn,
-            run: go(() =>
-              requestSignIn(
-                "Sign in to open this workspace on your other devices.",
-              ),
-            ),
-          },
-        ]
-      : []),
   ];
   const actions = allActions.filter(
     (a) => !q || a.label.toLowerCase().includes(q),

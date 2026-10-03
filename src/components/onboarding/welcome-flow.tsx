@@ -1,30 +1,18 @@
 import { useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowLeft, ArrowRight, CheckCircle } from "@phosphor-icons/react";
-import { AUTH_TITLES, useAuth, type DialogMode } from "@/lib/auth-store";
 import { isDesktop } from "@/lib/workspace";
 import { btn } from "@/components/ui/styles";
 import { ThemePicker } from "@/components/ui/theme-picker";
 import { AgentOnboardingSteps } from "@/components/agents/agent-onboarding";
-import { AuthForm } from "./auth-view";
 
-type Step = "welcome" | "theme" | "account";
-type Screen = Step | "agents" | "done";
+type Screen = "welcome" | "theme" | "agents" | "done";
 
 const WIDTH: Record<Screen, number> = {
   welcome: 480,
   theme: 600,
-  account: 380,
   agents: 560,
   done: 420,
-};
-
-const SUBTITLES: Record<DialogMode, string> = {
-  signin: "Welcome back. Sign in to open your workspace.",
-  signup:
-    "Your pages, tasks and agent chats live in your account and sync to every device you sign in on.",
-  reset: "We'll email you a code to set a new password.",
-  recovery: "Choose a new password for your account.",
 };
 
 const CARD =
@@ -86,31 +74,14 @@ function Progress({ screens, current }: { screens: Screen[]; current: Screen }) 
 }
 
 /**
- * Full-screen first run: welcome → theme → account → agents (desktop)
- * or "all set" (web). CoTenk needs an account, so signed out this is
- * the whole app; people who finished it before (`fresh` false) land
- * straight on sign-in.
+ * Full-screen first run: welcome → theme → agents (desktop) or "all
+ * set" (web). Everything stays on this device — there is no account.
  */
-export function WelcomeFlow({
-  fresh,
-  onDone,
-}: {
-  fresh: boolean;
-  onDone: () => void;
-}) {
-  const signedIn = useAuth((s) => s.status === "signedIn");
-  const mode = useAuth((s) => s.dialogMode);
-  const setMode = useAuth((s) => s.setDialogMode);
+export function WelcomeFlow({ onDone }: { onDone: () => void }) {
   const reduceMotion = useReducedMotion();
-  const [step, setStep] = useState<Step>(fresh ? "welcome" : "account");
+  const [screen, setScreen] = useState<Screen>("welcome");
   const desktop = isDesktop();
   const last: Screen = desktop ? "agents" : "done";
-  // Signed in after a reset: stay here until the new password is set.
-  const screen: Screen = !signedIn
-    ? step
-    : mode === "recovery"
-      ? "account"
-      : last;
 
   let body: ReactNode;
   if (screen === "welcome") {
@@ -130,7 +101,7 @@ export function WelcomeFlow({
         <button
           type="button"
           autoFocus
-          onClick={() => setStep("theme")}
+          onClick={() => setScreen("theme")}
           className={`${btn.primary} mt-8`}
         >
           Get started
@@ -151,7 +122,7 @@ export function WelcomeFlow({
         <div className="mt-6 flex items-center justify-between gap-2">
           <button
             type="button"
-            onClick={() => setStep("welcome")}
+            onClick={() => setScreen("welcome")}
             className={btn.ghost}
           >
             <ArrowLeft size={12} />
@@ -159,42 +130,13 @@ export function WelcomeFlow({
           </button>
           <button
             type="button"
-            onClick={() => {
-              setMode("signup");
-              setStep("account");
-            }}
+            onClick={() => setScreen(last)}
             className={btn.primary}
           >
             Continue
             <ArrowRight size={12} weight="bold" />
           </button>
         </div>
-      </>
-    );
-  } else if (screen === "account") {
-    body = (
-      <>
-        <div className={`${CARD} p-6`}>
-          <h2 className="text-[16px] font-semibold tracking-[-0.01em] text-ink">
-            {AUTH_TITLES[mode]}
-          </h2>
-          <p className="mt-1 text-[12.5px] leading-relaxed text-ink-3">
-            {SUBTITLES[mode]}
-          </p>
-          <div className="mt-5">
-            <AuthForm />
-          </div>
-        </div>
-        {fresh && !signedIn && (mode === "signin" || mode === "signup") && (
-          <button
-            type="button"
-            onClick={() => setStep("theme")}
-            className={`${btn.ghost} mt-4`}
-          >
-            <ArrowLeft size={12} />
-            Back
-          </button>
-        )}
       </>
     );
   } else if (screen === "agents") {
@@ -214,8 +156,8 @@ export function WelcomeFlow({
           You're all set
         </h2>
         <p className="mt-2 max-w-[340px] text-[13px] leading-relaxed text-ink-3">
-          Your workspace is ready. Agents run in the desktop app — the
-          checklist on Home shows how to get it.
+          Your workspace is ready and lives in this browser. Agents run in
+          the desktop app — the checklist on Home shows how to get it.
         </p>
         <button
           type="button"
@@ -241,12 +183,7 @@ export function WelcomeFlow({
           <Mark size="sm" />
           <span className="text-[13px] font-medium text-ink-2">CoTenk</span>
         </div>
-        {fresh && (
-          <Progress
-            screens={["welcome", "theme", "account", last]}
-            current={screen}
-          />
-        )}
+        <Progress screens={["welcome", "theme", last]} current={screen} />
       </header>
       <main className="relative flex flex-1 items-center justify-center px-6 pb-14 pt-4">
         <AnimatePresence mode="wait" initial={false}>

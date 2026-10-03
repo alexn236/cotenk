@@ -8,9 +8,8 @@ import { slugify } from "@/lib/headings";
 import { dueBucket, formatDue, isAgentName, isoDay } from "@/lib/tasks";
 import { useWorkspace } from "@/lib/store";
 import { useAgentSetup } from "@/lib/agent-setup";
-import { fileDownloadUrl, FILE_REF, IMAGE_REF, useImageSrc } from "@/lib/images";
+import { downloadFile, FILE_REF, IMAGE_REF, useImageSrc } from "@/lib/images";
 import { toast } from "@/lib/toast";
-import { track } from "@/lib/analytics";
 import {
   findDocByTitle,
   linkifyWikilinks,
@@ -194,7 +193,6 @@ function ActionLink({ action, children }: { action: string; children: ReactNode 
   const web = action === "connect-agent" && !isDesktop();
   const run = () => {
     const ws = useWorkspace.getState();
-    track("page_cta", { action, web });
     if (action === "import") ws.setImportOpen(true);
     else if (action === "connect-agent") {
       if (web) openExternal(DESKTOP_DOWNLOAD_URL);
@@ -233,8 +231,7 @@ function Link({
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          fileDownloadUrl(path, nodeToText(children) || "file").then(
-            openExternal,
+          downloadFile(path, nodeToText(children) || "file").catch(
             (err) => toast(err instanceof Error ? err.message : String(err), { tone: "error" }),
           );
         }}
@@ -268,7 +265,7 @@ function Link({
   );
 }
 
-/** Images: `cotenk-image:` references are fetched from the account's storage. */
+/** Images: `cotenk-image:` references are read from the workspace folder. */
 function Img({
   node,
   src,

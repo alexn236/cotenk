@@ -35,15 +35,12 @@ export function descendantIds(docs: Doc[], id: string): Set<string> {
 }
 
 export type { ThemePref } from "./theme";
-export type SyncStatus = "idle" | "syncing" | "synced" | "error";
 export type TaskFilter = "all" | "open" | "done";
 export type TaskGroup = "page" | "due";
 export type TaskView = "list" | "board";
-export type MarketTab = "discover" | "mine" | "build";
+export type MarketTab = "discover" | "build";
 export type SettingsSection =
   | "appearance"
-  | "account"
-  | "sync"
   | "agents"
   | "extensions"
   | "data"
@@ -65,11 +62,8 @@ type WorkspaceState = {
   /** Only show tasks assigned to this @name (lowercase). */
   taskAssignee: string | null;
   settingsSection: SettingsSection;
-  syncStatus: SyncStatus;
   paletteOpen: boolean;
   marketTab: MarketTab;
-  /** Doc whose "Publish to marketplace" dialog is open. */
-  publishDocId: string | null;
   /** Folder whose name is being edited inline in the sidebar. */
   renamingFolderId: string | null;
   /** Import dialog (Notion / Obsidian / markdown). */
@@ -117,7 +111,6 @@ type WorkspaceState = {
   setSettingsSection: (s: SettingsSection) => void;
   setPaletteOpen: (open: boolean) => void;
   setMarketTab: (t: MarketTab) => void;
-  setPublishDocId: (id: string | null) => void;
   setRenamingFolderId: (id: string | null) => void;
   setImportOpen: (open: boolean) => void;
   /** Opens "Ask agent" on this doc once the editor shows it. */
@@ -125,8 +118,8 @@ type WorkspaceState = {
   setHistoryDocId: (id: string | null) => void;
 };
 
-// A signed-out session that already has pages resumes them; everyone
-// else starts on the seed workspace (welcome page first).
+// Pages saved on this device come back; a first start opens the seed
+// workspace (welcome page first).
 const local = typeof window !== "undefined" ? loadLocalWorkspace() : null;
 const initialDocs = local ? upgradeWelcome(local.docs) : seedDocs;
 const initialFolders = local?.folders ?? seedFolders;
@@ -153,10 +146,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   taskView: "list" as TaskView,
   taskAssignee: null,
   settingsSection: "appearance" as SettingsSection,
-  syncStatus: "idle" as SyncStatus,
   paletteOpen: false,
   marketTab: "discover" as MarketTab,
-  publishDocId: null,
   renamingFolderId: null,
   importOpen: false,
   askAgentDocId: null,
@@ -396,7 +387,6 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   setSettingsSection: (s) => set({ settingsSection: s }),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   setMarketTab: (t) => set({ marketTab: t }),
-  setPublishDocId: (id) => set({ publishDocId: id }),
   setRenamingFolderId: (id) => set({ renamingFolderId: id }),
   setImportOpen: (open) => set({ importOpen: open }),
   requestAskAgent: (docId) => set({ askAgentDocId: docId }),

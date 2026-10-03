@@ -2,6 +2,12 @@
   "name": "cotenk",
   "version": "0.1.0",
   "private": true,
+  "description": "Local-first workspace where people and AI agents share documents, tasks and context.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alexn236/cotenk"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,7 +22,6 @@
     "@fontsource-variable/geist": "^5",
     "@fontsource-variable/geist-mono": "^5",
     "@phosphor-icons/react": "^2.1.10",
-    "@supabase/supabase-js": "^2.116.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "fflate": "^0.8.3",
@@ -31,6 +36,7 @@
     "@eslint/js": "^9",
     "@tailwindcss/vite": "^4",
     "@tauri-apps/cli": "^2",
+    "@types/node": "^22.20.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^5",

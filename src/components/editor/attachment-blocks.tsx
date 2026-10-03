@@ -9,13 +9,12 @@ import {
 } from "@phosphor-icons/react";
 import {
   buildImageMd,
-  fileDownloadUrl,
+  downloadFile,
   parseFileMd,
   parseImageMd,
   useImageSrc,
 } from "@/lib/images";
 import { toast } from "@/lib/toast";
-import { openExternal } from "@/lib/workspace";
 
 const TOOL =
   "grid h-7 w-7 place-items-center rounded-[7px] border border-line bg-elev/90 text-ink-2 shadow-[0_2px_8px_var(--color-shadow)] transition-opacity duration-150 hover:text-ink";
@@ -221,7 +220,7 @@ export function FileBody({
   const open = async () => {
     setBusy(true);
     try {
-      openExternal(await fileDownloadUrl(parsed.path, parsed.name));
+      await downloadFile(parsed.path, parsed.name);
     } catch (e) {
       toast(e instanceof Error ? e.message : String(e), { tone: "error" });
     } finally {

@@ -26,7 +26,7 @@ const MENU_W = 168;
 type MenuPos = { left: number; top: number; flip: boolean };
 
 /** Sidebar section for the Agents rail: pinned chats, project groups
- *  with nested chats, and unfiled chats — all backed by Supabase. */
+ *  with nested chats, and unfiled chats — all saved on this device. */
 export function AgentsNav() {
   const chats = useAgent((s) => s.chats);
   const projects = useAgent((s) => s.projects);

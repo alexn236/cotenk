@@ -13,7 +13,6 @@ import {
   PushPin,
   PushPinSlash,
   Trash,
-  UploadSimple,
   type Icon,
 } from "@phosphor-icons/react";
 import { trashDoc, useWorkspace } from "@/lib/store";
@@ -55,7 +54,7 @@ function MenuButton({
 
 /**
  * Page actions shared by the sidebar row menu and the editor header:
- * pin, move, duplicate, copy, ask agent, publish, delete.
+ * pin, move, duplicate, copy, ask agent, history, delete.
  */
 export function PageMenuItems({
   doc,
@@ -71,7 +70,6 @@ export function PageMenuItems({
   const togglePin = useWorkspace((s) => s.togglePin);
   const moveDoc = useWorkspace((s) => s.moveDoc);
   const duplicateDoc = useWorkspace((s) => s.duplicateDoc);
-  const setPublishDocId = useWorkspace((s) => s.setPublishDocId);
   const createSubpage = useWorkspace((s) => s.createSubpage);
   const setParent = useWorkspace((s) => s.setParent);
   const setHistoryDocId = useWorkspace((s) => s.setHistoryDocId);
@@ -175,11 +173,6 @@ export function PageMenuItems({
         icon={ClockCounterClockwise}
         label="Version history"
         onClick={done(() => setHistoryDocId(doc.id))}
-      />
-      <MenuButton
-        icon={UploadSimple}
-        label="Publish to marketplace"
-        onClick={done(() => setPublishDocId(doc.id))}
       />
       <div className="my-1 h-px bg-line-soft" />
       <MenuButton

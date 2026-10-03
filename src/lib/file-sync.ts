@@ -3,15 +3,15 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useWorkspace } from "./store";
 import { isDesktop, resolveWorkspaceDir } from "./workspace";
 import type { Doc, Folder } from "./types";
-import { noteDiskChange } from "./analytics";
+import { noteDiskChange } from "./activity";
 import { newId } from "./ids";
 
 /**
  * Workspace folder sync: mirrors docs/folders into a local directory as
- * `.md` files so the Devin agent can read and edit them on disk.
+ * `.md` files so agents can read and edit them on disk.
  *
- *   Supabase → store (initSync) → reconcile → files
- *   agent edits file → watcher → reconcile → store → initSync → Supabase
+ *   store → reconcile → files
+ *   agent edits file → watcher → reconcile → store
  *
  * Every file carries a small frontmatter block so its identity survives
  * renames and moves:
@@ -196,18 +196,13 @@ let timer: ReturnType<typeof setTimeout> | null = null;
  */
 let knownFileIds = new Set<string>();
 /**
- * Bumped when a folder session starts or ends (sign-in/out switches the
- * workspace and its folder). A reconcile that started in another session
- * stops before touching the store or the disk — otherwise it would
- * compare the new workspace against the old folder and delete files
- * there that "vanished from the store".
+ * Bumped when a folder session starts or ends. A reconcile that started
+ * in another session stops before touching the store or the disk —
+ * otherwise it would compare the workspace against a stale folder and
+ * delete files there that "vanished from the store".
  */
 let session = 0;
-/**
- * The session whose folder is live (its first reconcile has started).
- * While a signed-in workspace waits for its first pull the store is
- * empty — a stray reconcile then would delete every file in the folder.
- */
+/** The session whose folder is live (its first reconcile has started). */
 let liveSession = -1;
 
 async function reconcile() {
@@ -405,25 +400,18 @@ function schedule() {
 
 /**
  * Starts folder sync for the session, merges once, then watches the
- * folder. Signed in (`afterPull`), it waits until the Supabase pull has
- * landed successfully — starting on a failed pull (offline launch) used
- * to reconcile the folder against the seed workspace and delete every
- * account page from disk. Returns a dispose function.
+ * folder. Returns a dispose function.
  */
-export function initFileSync({
-  afterPull = false,
-}: { afterPull?: boolean } = {}): () => void {
-  // The web build has no local folder — Supabase is the only store.
+export function initFileSync(): () => void {
+  // The web build has no local folder — the browser cache is the store.
   if (!isDesktop()) return () => {};
-  // New folder session: file ids seen in the previous one (another
-  // workspace, another folder) mean nothing here.
+  // New folder session: file ids seen in the previous one mean nothing.
   session += 1;
   const mySession = session;
   knownFileIds = new Set();
   let disposed = false;
   let unlisten: UnlistenFn | null = null;
   let unsubStore: (() => void) | null = null;
-  let unsubGate: (() => void) | null = null;
 
   const start = async () => {
     if (disposed) return;
@@ -450,17 +438,7 @@ export function initFileSync({
     });
   };
 
-  if (!afterPull) {
-    void start();
-  } else {
-    unsubGate = useWorkspace.subscribe((s) => {
-      if (s.syncStatus === "synced") {
-        unsubGate?.();
-        unsubGate = null;
-        void start();
-      }
-    });
-  }
+  void start();
 
   return () => {
     disposed = true;
@@ -468,7 +446,6 @@ export function initFileSync({
     if (timer) clearTimeout(timer);
     unlisten?.();
     unsubStore?.();
-    unsubGate?.();
     void invoke("fs_unwatch").catch(() => {});
   };
 }

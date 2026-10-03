@@ -25,7 +25,6 @@ import {
   type PluginExtension,
   type PluginServer,
   type PluginSkill,
-  type RemoteState,
   type SkillExtension,
 } from "@/lib/extensions";
 import {
@@ -54,19 +53,8 @@ type PluginSource = {
 
 type SkillSeed = Pick<SkillExtension, "name" | "description" | "body">;
 
-const REMOTE_NOTE: Record<RemoteState, string> = {
-  off: "Saved on this device. Sign in to have them on your other devices too.",
-  syncing: "Syncing with your account…",
-  synced:
-    "Synced with your account. Secret values (keys, tokens) stay on this device.",
-  missing:
-    "Account sync isn't set up yet (agent_extensions table missing) — saved on this device for now.",
-  error: "Couldn't reach your account — saved on this device, retrying.",
-};
-
 export function ExtensionsSection() {
   const items = useExtensions((s) => s.items);
-  const remote = useExtensions((s) => s.remote);
   const update = useExtensions((s) => s.update);
   const [editing, setEditing] = useState<Editing | null>(null);
   const [addingPlugin, setAddingPlugin] = useState(false);
@@ -381,7 +369,10 @@ export function ExtensionsSection() {
         )}
       </Card>
 
-      <p className="mt-3 text-[12px] text-ink-3">{REMOTE_NOTE[remote]}</p>
+      <p className="mt-3 text-[12px] text-ink-3">
+        Saved on this device. Secret values (keys, tokens) are stored apart
+        from the list.
+      </p>
       <p className="mt-2 font-mono text-[11px] leading-relaxed text-ink-3">
         claude code: everything is handed over per session, skills load as
         cotenk:&lt;name&gt; · devin cli: skills and servers come through the
@@ -744,7 +735,7 @@ function PluginDetails({
           </div>
         ))}
         <span className="text-[11.5px] text-ink-3">
-          Values stay on this device — only the names sync to your account.
+          Values stay on this device and are kept apart from the list.
         </span>
       </div>
 
@@ -936,7 +927,7 @@ function McpEditor({
           Add {stdio ? "variable" : "header"}
         </button>
         <span className="text-[11.5px] text-ink-3">
-          Values stay on this device — only the names sync to your account.
+          Values stay on this device and are kept apart from the list.
         </span>
       </div>
 

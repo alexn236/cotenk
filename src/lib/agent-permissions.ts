@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import type { AgentKind } from "./agents";
-import { track } from "./analytics";
 
 /**
  * Review of agent actions. ACP agents ask before they edit a file or run
@@ -250,7 +249,6 @@ export function answerPermission(
 ) {
   const req = usePermissions.getState().queue.find((r) => r.id === id);
   if (!req) return;
-  track("agent_permission", { decision, kind: req.kind, agent: req.agent });
   if (decision === "reject") {
     const opt = pick(req.options, ["reject_once", "reject_always"]);
     settle(id, opt?.optionId ?? null);

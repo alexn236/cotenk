@@ -13,7 +13,6 @@ import { AgentIntro, AgentSteps } from "./agent-setup-guide";
 
 /** What each agent asks of people, shown on the pick step. */
 const NEEDS: Record<AgentKind, string> = {
-  cotenk: "Just an API key: Anthropic, OpenAI, OpenRouter and more",
   claude: "A Claude account · installs through npm",
   devin: "A Devin account · comes with its own installer",
 };
@@ -22,15 +21,14 @@ type Phase = { step: "pick" } | { step: "setup"; i: number } | { step: "done" };
 
 /**
  * Agents step of the welcome flow (desktop only): choose which agents
- * to use — the built-in CoTenk Agent, Claude Code, Devin CLI — then set
- * each one up in turn. The Home checklist and Settings → Agents cover
+ * to use — Claude Code, Devin CLI — then set each one up in turn. The Home checklist and Settings → Agents cover
  * everything later.
  */
 export function AgentOnboardingSteps({ onFinish }: { onFinish: () => void }) {
   const setup = useAgentSetup((s) => s.setup);
   const setDefaultAgent = useAgent((s) => s.setDefaultAgent);
   const defaultAgent = useAgent((s) => s.defaultAgent);
-  const [picked, setPicked] = useState<AgentKind[]>(["cotenk"]);
+  const [picked, setPicked] = useState<AgentKind[]>(["claude"]);
   /** Agents still to set up, fixed when leaving the pick step. */
   const [queue, setQueue] = useState<AgentKind[]>([]);
   const [phase, setPhase] = useState<Phase>({ step: "pick" });
@@ -90,11 +88,6 @@ export function AgentOnboardingSteps({ onFinish }: { onFinish: () => void }) {
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2 text-[13px] text-ink">
                     {AGENTS[k].name}
-                    {k === "cotenk" && (
-                      <span className="rounded-full bg-accent-dim px-1.5 py-px text-[10.5px] text-accent">
-                        built in · recommended
-                      </span>
-                    )}
                     {ready && (
                       <span className="flex items-center gap-1 text-[11px] text-ink-3">
                         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/80" />

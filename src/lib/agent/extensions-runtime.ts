@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import workspaceSkill from "./cotenk-skill.md?raw";
 import type { AgentKind } from "../agents";
-import { cotenkAgentEnv } from "../cotenk-agent";
 import { newId } from "../ids";
 import {
   BUILTIN_MCP,
@@ -14,15 +13,12 @@ import {
 } from "../extensions";
 
 /**
- * Hands the enabled extensions (Settings → Skills & MCP) to the agents
+ * Hands the enabled extensions (Settings → Agent customisation) to the agents
  * without touching their own configuration:
  *
  *  - Claude Code gets everything per ACP session: skills as a session
  *    plugin (`_meta.claudeCode.options.plugins` → `cotenk:<name>`), MCP
  *    servers in `mcpServers`.
- *  - The CoTenk Agent (OpenCode) reads the same skills folder through
- *    `skills.paths` in its environment config and takes MCP servers in
- *    `session/new` like Claude Code.
  *  - Devin CLI ignores `mcpServers` from `session/new`, so the workspace's
  *    `.devin/mcp_config.local.json` lists one server, the CoTenk gateway
  *    (`cotenk --mcp-gateway`, src-tauri/src/mcp_gateway.rs). It serves
@@ -145,7 +141,7 @@ function secretPairs(e: McpExtension): EnvPair[] {
     .map((k) => ({ name: k, value: secrets[k] }));
 }
 
-/** Claude Code and the CoTenk Agent: servers straight into `session/new`. */
+/** Claude Code: servers straight into `session/new`. */
 function sessionServers(): AcpMcpServer[] {
   return enabledServers().map((e) =>
     e.transport === "stdio"
@@ -216,9 +212,6 @@ async function registerGateway(root: string, { dir, exe }: Paths) {
 
 let devinRoot: string | null = null;
 
-export const NO_KEY_MESSAGE =
-  "The CoTenk Agent needs an API key — add one in Settings → Agents.";
-
 /**
  * Before an agent process starts in `root`: files in place, plus the
  * environment it is spawned with.
@@ -231,11 +224,6 @@ export function prepareAgent(
     await removeLegacyWorkspaceSkill(root);
     const p = await getPaths();
     await writeSkills(p.dir);
-    if (kind === "cotenk") {
-      const env = cotenkAgentEnv(skillsDir(p.dir));
-      if (!env) throw new Error(NO_KEY_MESSAGE);
-      return env;
-    }
     if (kind !== "devin") return {};
     await writeGatewayConfig(p.dir);
     await registerGateway(root, p);
@@ -249,7 +237,6 @@ export async function sessionExtensions(
   kind: AgentKind,
 ): Promise<SessionExtensions> {
   if (kind === "devin") return { mcpServers: [] };
-  if (kind === "cotenk") return { mcpServers: sessionServers() };
   const { dir } = await getPaths();
   await serialized(() => writeSkills(dir));
   return {
@@ -263,8 +250,7 @@ export async function sessionExtensions(
 }
 
 // The gateway re-reads its files on every request, so a running Devin
-// picks up edits right away. Claude gets them with its next session,
-// the CoTenk Agent its MCP servers too (skills when it restarts).
+// picks up edits right away. Claude gets them with its next session.
 let refresh: ReturnType<typeof setTimeout> | null = null;
 useExtensions.subscribe((s, prev) => {
   if (s.items === prev.items || !paths) return;

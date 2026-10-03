@@ -32,9 +32,9 @@ const AGENTS_KEY = "cotenk-onboarding-agents";
 export const agentOnboardingDone = () => read(AGENTS_KEY);
 
 /**
- * The first-run welcome flow (theme, account, agents) was finished.
+ * The first-run welcome flow (theme, agents) was finished.
  * People who already went through the older agent dialog or the Home
- * checklist count as done — they go straight to sign-in.
+ * checklist count as done.
  */
 const WELCOME_KEY = "cotenk-onboarding-welcome";
 export const welcomeFinished = () =>
