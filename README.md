@@ -4,7 +4,7 @@
 
 # CoTenk
 
-### The open-source ChatGPT Spaces — on your machine, with your own agents.
+### The open-source AI workspace — on your machine, with your own agents.
 
 One space for your notes, tasks and AI agents. Your agent doesn't chat *about*
 your work — it opens the page and writes into it, while you watch.
@@ -48,7 +48,7 @@ CoTenk flips that:
 > **Think together. Work together.** A space where you and your agents share
 > the same pages, the same tasks and the same context.
 
-| | Hosted AI spaces | **CoTenk** |
+| | Hosted AI workspaces | **CoTenk** |
 | --- | :---: | :---: |
 | Open source | ❌ | ✅ MIT |
 | Your notes stay on your machine | ❌ | ✅ |
@@ -265,3 +265,9 @@ src-tauri/
 ## 📄 License
 
 [MIT](LICENSE) — do whatever you want, just keep the notice.
+
+<sub>CoTenk is an independent open-source project and is not affiliated with,
+endorsed by or sponsored by Anthropic, Cognition, Notion, Obsidian or
+OpenAI. Claude Code, Devin and the other product names mentioned here are
+trademarks of their respective owners and are used only to describe
+compatibility.</sub>
