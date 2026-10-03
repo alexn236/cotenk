@@ -76,6 +76,9 @@ CoTenk flips that:
 
 ## 🚀 Quick start
 
+**Download** the app for Windows, macOS or Linux from
+[Releases](https://github.com/alexn236/cotenk/releases/latest) — or build it yourself:
+
 ```bash
 git clone https://github.com/alexn236/cotenk.git
 cd cotenk
