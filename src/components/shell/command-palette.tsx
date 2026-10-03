@@ -7,6 +7,7 @@ import {
   FileHtml,
   FolderPlus,
   GearSix,
+  Graph,
   Hand,
   House,
   Lightning,
@@ -172,6 +173,14 @@ function buildItems(
       label: "Go to Tasks",
       icon: CheckSquare,
       run: go(() => ws.setRailSection("tasks")),
+    },
+    {
+      id: "graph",
+      group: "Actions",
+      label: "Open the graph",
+      hint: "Pages, folders, people and agents as a live map",
+      icon: Graph,
+      run: go(() => ws.setRailSection("graph")),
     },
     {
       id: "agents",

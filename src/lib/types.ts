@@ -18,6 +18,7 @@ export type Doc = {
 export type RailSection =
   | "home"
   | "docs"
+  | "graph"
   | "tasks"
   | "agents"
   | "market"

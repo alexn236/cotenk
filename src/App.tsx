@@ -28,6 +28,9 @@ const SettingsView = lazyView(() =>
 const AgentsView = lazyView(() =>
   import("@/components/agents/agents-view").then((m) => m.AgentsView),
 );
+const GraphView = lazyView(() =>
+  import("@/components/graph/graph-view").then((m) => m.GraphView),
+);
 const MarketView = lazyView(() =>
   import("@/components/market/market-view").then((m) => m.MarketView),
 );
@@ -90,6 +93,8 @@ export default function App() {
                 <AgentsView />
               ) : railSection === "market" ? (
                 <MarketView />
+              ) : railSection === "graph" ? (
+                <GraphView />
               ) : (
                 <DocEditor />
               )}

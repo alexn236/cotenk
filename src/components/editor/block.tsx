@@ -19,6 +19,7 @@ import {
   FileHtml,
   PencilSimple,
   Plus,
+  Sparkle,
   Trash,
 } from "@phosphor-icons/react";
 import { looksLikeEmbed, serializeBlocks } from "@/lib/blocks";
@@ -37,6 +38,7 @@ import { embedAsHtmlPage } from "@/lib/html-page";
 import { FileBody, ImageBody } from "./attachment-blocks";
 import { useSuggest } from "@/components/ui/use-suggest";
 import { autosizeTextarea, useIsomorphicLayoutEffect } from "./utils";
+import { celebrate } from "@/lib/celebrate";
 
 function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(
@@ -195,6 +197,11 @@ export type BlockProps = {
   onLangChange: (lang: string) => void;
   /** An embed called cotenk.save(data) — `json` is the new state. */
   onEmbedState: (json: string) => void;
+  /**
+   * Set when this block just changed outside the editor (an agent wrote
+   * it): plays the highlight sweep; "agent" also shows the tag.
+   */
+  flash?: { tick: number; by: "agent" | "sync" } | null;
 };
 
 /**
@@ -223,6 +230,7 @@ export function Block({
   onToggleChecked,
   onLangChange,
   onEmbedState,
+  flash,
 }: BlockProps) {
   const reduceMotion = useReducedMotion();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -430,7 +438,10 @@ export function Block({
           aria-label={block.checked ? "Mark task open" : "Mark task done"}
           aria-pressed={block.checked}
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => onToggleChecked(!block.checked)}
+          onClick={(e) => {
+            if (!block.checked) celebrate(e.currentTarget);
+            onToggleChecked(!block.checked);
+          }}
           className={`mt-[10px] grid h-[14px] w-[14px] place-items-center rounded-[4px] border-[1.5px] transition-colors duration-150 ease-out-expo ${
             block.checked
               ? "border-accent bg-accent text-on-accent"
@@ -453,8 +464,33 @@ export function Block({
         delay: Math.min(index, 12) * 0.03,
         ease: [0.16, 1, 0.3, 1],
       }}
-      className="group relative rounded-[6px]"
+      data-block-id={block.id}
+      className={`group relative rounded-[6px] ${
+        index === 0
+          ? ""
+          : block.type === "h1"
+            ? "mt-8"
+            : block.type === "h2"
+              ? "mt-6"
+              : block.type === "h3"
+                ? "mt-4"
+                : ""
+      }`}
     >
+      {flash && !reduceMotion && (
+        <span
+          key={flash.tick}
+          aria-hidden
+          className="agent-flash pointer-events-none absolute -inset-x-3 -inset-y-1 rounded-[8px]"
+        >
+          {flash.by === "agent" && (
+            <span className="agent-flash-tag absolute -top-2.5 right-2 inline-flex items-center gap-1 rounded-full bg-accent px-1.5 py-px text-[10px] font-medium text-on-accent shadow-[0_2px_8px_var(--color-shadow)]">
+              <Sparkle size={9} weight="fill" />
+              agent
+            </span>
+          )}
+        </span>
+      )}
       <button
         type="button"
         aria-label="Add block below"

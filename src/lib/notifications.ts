@@ -82,8 +82,12 @@ export function startNotifications(): () => void {
   const digest = () => {
     const today = isoDay(new Date());
     try {
-      if (localStorage.getItem(DIGEST_KEY) === today) return;
+      const last = localStorage.getItem(DIGEST_KEY);
+      if (last === today) return;
       localStorage.setItem(DIGEST_KEY, today);
+      // The very first start shows the sample workspace — its tasks are
+      // examples, not a to-do list worth a reminder.
+      if (last === null) return;
     } catch {
       /* storage unavailable — summarize once per start */
     }

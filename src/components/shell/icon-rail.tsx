@@ -2,6 +2,7 @@ import { motion } from "motion/react";
 import {
   CheckSquare,
   Files,
+  Graph,
   GearSix,
   House,
   Lightning,
@@ -24,6 +25,7 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { id: "home", label: "Home", Icon: House },
   { id: "docs", label: "Documents", Icon: Files },
+  { id: "graph", label: "Graph", Icon: Graph },
   { id: "tasks", label: "Tasks", Icon: CheckSquare },
   { id: "agents", label: "Agents", Icon: Lightning },
   { id: "market", label: "Templates", Icon: Storefront },

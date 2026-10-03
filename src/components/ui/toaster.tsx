@@ -1,17 +1,22 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { X } from "@phosphor-icons/react";
 import { useToasts } from "@/lib/toast";
+import { useWorkspace } from "@/lib/store";
 
 /** Bottom-right toast stack — clear of composers and the agent pill. */
 export function Toaster() {
   const toasts = useToasts((s) => s.toasts);
   const dismiss = useToasts((s) => s.dismiss);
   const reduceMotion = useReducedMotion();
+  // The chat composer sits at the bottom of the agents view — stay above it.
+  const lifted = useWorkspace((s) => s.railSection === "agents");
 
   return (
     <div
       aria-live="polite"
-      className="pointer-events-none fixed bottom-5 right-5 z-[70] flex flex-col items-end gap-2"
+      className={`pointer-events-none fixed right-5 z-[70] flex flex-col items-end gap-2 transition-[bottom] duration-200 ease-out-expo ${
+        lifted ? "bottom-28" : "bottom-5"
+      }`}
     >
       <AnimatePresence initial={false}>
         {toasts.map((t) => (

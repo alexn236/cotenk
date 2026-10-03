@@ -5,11 +5,12 @@ import { isDesktop } from "@/lib/workspace";
 import { btn } from "@/components/ui/styles";
 import { ThemePicker } from "@/components/ui/theme-picker";
 import { AgentOnboardingSteps } from "@/components/agents/agent-onboarding";
+import { WelcomeDemo } from "./welcome-demo";
 
 type Screen = "welcome" | "theme" | "agents" | "done";
 
 const WIDTH: Record<Screen, number> = {
-  welcome: 480,
+  welcome: 520,
   theme: 600,
   agents: 560,
   done: 420,
@@ -94,15 +95,30 @@ export function WelcomeFlow({ onDone }: { onDone: () => void }) {
         <p className="mt-1.5 text-[14px] text-ink-2">
           Think together. Work together.
         </p>
-        <p className="mt-4 max-w-[360px] text-[13px] leading-relaxed text-ink-3">
+        <p className="mt-4 max-w-[380px] text-[13px] leading-relaxed text-ink-3">
           An open workspace where people and AI agents share documents, tasks
-          and context.
+          and context. Your agent writes into the same pages you do.
         </p>
+        <div className="mt-7 w-full">
+          <WelcomeDemo />
+        </div>
+        <div className="mt-5 flex flex-wrap justify-center gap-1.5">
+          {["Local-first, no account", "Open source", "Claude Code · Devin CLI"].map(
+            (t) => (
+              <span
+                key={t}
+                className="rounded-full border border-line-soft bg-panel px-2.5 py-1 text-[11.5px] text-ink-2"
+              >
+                {t}
+              </span>
+            ),
+          )}
+        </div>
         <button
           type="button"
           autoFocus
           onClick={() => setScreen("theme")}
-          className={`${btn.primary} mt-8`}
+          className={`${btn.primary} mt-7`}
         >
           Get started
           <ArrowRight size={12} weight="bold" />

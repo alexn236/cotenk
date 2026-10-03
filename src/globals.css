@@ -118,6 +118,15 @@ body {
     color 240ms var(--ease-out-expo);
 }
 
+/* Keyboard focus: a soft accent ring instead of the browser's black one.
+   In the base layer so utilities like outline-none still win. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--color-accent-line);
+    outline-offset: 2px;
+  }
+}
+
 ::selection {
   background: var(--color-accent-dim);
   color: var(--color-ink);
@@ -402,4 +411,98 @@ kbd {
 .prose-doc strong {
   font-weight: 620;
   color: var(--color-ink);
+}
+
+/* ============================================================
+   Agent edits: a block an agent just wrote glows, a light sweep
+   runs across it and a small "agent" tag floats above it.
+   ============================================================ */
+.agent-flash {
+  background: linear-gradient(
+      100deg,
+      transparent 20%,
+      color-mix(in srgb, var(--color-accent) 22%, transparent) 50%,
+      transparent 80%
+    )
+    no-repeat,
+    var(--color-accent-dim);
+  background-size:
+    220% 100%,
+    100% 100%;
+  box-shadow: inset 2px 0 0 var(--color-accent);
+  animation: agent-flash 2.6s var(--ease-out-expo) forwards;
+}
+.agent-flash-tag {
+  animation: agent-flash-tag 2.6s var(--ease-out-expo) forwards;
+}
+@keyframes agent-flash {
+  0% {
+    opacity: 0;
+    background-position:
+      140% 0,
+      0 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  55% {
+    opacity: 1;
+    background-position:
+      -60% 0,
+      0 0;
+  }
+  100% {
+    opacity: 0;
+    background-position:
+      -60% 0,
+      0 0;
+  }
+}
+@keyframes agent-flash-tag {
+  0% {
+    opacity: 0;
+    transform: translateY(4px) scale(0.9);
+  }
+  12%,
+  70% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+
+/* Ticking off a task: the box pops and the line strikes through. */
+.prose-doc input[type="checkbox"]:checked {
+  animation: task-pop 320ms var(--ease-out-expo);
+}
+@keyframes task-pop {
+  0% {
+    transform: scale(0.7);
+  }
+  55% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-flash,
+  .agent-flash-tag,
+  .prose-doc input[type="checkbox"]:checked {
+    animation: none;
+  }
+}
+
+.task-check {
+  animation: task-pop 320ms var(--ease-out-expo);
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-check {
+    animation: none;
+  }
 }

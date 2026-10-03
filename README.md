@@ -39,11 +39,17 @@ up (`src/components/agents/agent-onboarding.tsx`).
   backlinks under “Linked from”. Pages can be dragged into folders.
 - **Agents in the workspace** — "Ask agent" on every page, "Hand to
   agent" on every task. The agent edits the real file on disk; the open
-  page follows the change live and Ctrl+Z reverts it.
+  page follows the change live — every block it writes lights up with an
+  "agent" tag — and Ctrl+Z reverts it.
+- **Graph** — a live map of your pages, the folders they sit in and the
+  people and agents their open tasks belong to. `[[Links]]` and subpages
+  connect pages; drag, zoom, hover to light up a neighborhood, click to
+  open. A small force simulation on a canvas, no library.
 - **Tasks** — every `- [ ]` across all pages, with `@owner` and
   `due:YYYY-MM-DD` markers, grouped by page or due date, filterable by
   person or agent. The Board view is a kanban by due date; dragging a
-  card re-dates (or ticks off) the task in its page.
+  card re-dates (or ticks off) the task in its page. Ticking a task off
+  gets a small burst of sparks.
 - **Templates** — curated templates and "Build with AI" (describe a
   page, the agent builds it).
 - **Version history** — earlier versions of every page and the pages

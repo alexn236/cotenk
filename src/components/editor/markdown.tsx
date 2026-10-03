@@ -17,6 +17,7 @@ import {
   titleKey,
 } from "@/lib/wikilinks";
 import { DESKTOP_DOWNLOAD_URL, isDesktop, openExternal } from "@/lib/workspace";
+import { celebrate } from "@/lib/celebrate";
 
 /**
  * Called when a rendered task-list checkbox is toggled.
@@ -87,7 +88,9 @@ function CheckboxInput({
           scope.querySelectorAll('input[type="checkbox"]'),
         );
         const ordinal = boxes.indexOf(el);
-        if (ordinal >= 0) onToggle(ordinal, el.checked);
+        if (ordinal < 0) return;
+        if (el.checked) celebrate(el);
+        onToggle(ordinal, el.checked);
       }}
     />
   );

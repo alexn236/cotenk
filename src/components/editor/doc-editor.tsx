@@ -67,6 +67,9 @@ type Snap = {
  */
 const CONTENTS_MIN_WIDTH = 1100;
 
+/** Identity of a block's content, independent of its (regenerated) id. */
+const blockKey = (b: BlockData) => serializeBlocks([b]);
+
 function nowMs() {
   return Date.now();
 }
@@ -119,6 +122,10 @@ function EditorView({ doc }: { doc: Doc }) {
   // another device); drives the short "Updated by …" notice.
   const [externalTick, setExternalTick] = useState(0);
   const [externalBy, setExternalBy] = useState<"agent" | "sync">("sync");
+  /** Blocks that just changed outside the editor — they glow briefly. */
+  const [flashed, setFlashed] = useState<{ ids: Set<string>; tick: number } | null>(
+    null,
+  );
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // Too narrow for the contents card beside the text: it stays hidden
@@ -181,11 +188,32 @@ function EditorView({ doc }: { doc: Doc }) {
           },
         ]);
         setFuture([]);
-        setBlocks(parseBlocks(next.content));
+        const nextBlocks = parseBlocks(next.content);
+        // New or rewritten blocks: their markdown isn't on the page yet.
+        const seen = new Set(blocksRef.current.map(blockKey));
+        const changed = new Set(
+          nextBlocks.filter((b) => !seen.has(blockKey(b))).map((b) => b.id),
+        );
+        setBlocks(nextBlocks);
         setEditingId(null);
         const agentBusy = useAgent.getState().status === "running";
         setExternalBy(agentBusy ? "agent" : "sync");
         setExternalTick((t) => t + 1);
+        if (changed.size > 0) {
+          setFlashed((f) => ({ ids: changed, tick: (f?.tick ?? 0) + 1 }));
+          // Bring the first change into view if it landed off-screen.
+          const first = nextBlocks.find((b) => changed.has(b.id))?.id;
+          requestAnimationFrame(() => {
+            const root = scrollRef.current;
+            const el = root?.querySelector(`[data-block-id="${first}"]`);
+            if (!root || !el) return;
+            const r = el.getBoundingClientRect();
+            const v = root.getBoundingClientRect();
+            if (r.top < v.top || r.bottom > v.bottom) {
+              el.scrollIntoView({ block: "center", behavior: "smooth" });
+            }
+          });
+        }
       }),
     [doc.id],
   );
@@ -195,6 +223,12 @@ function EditorView({ doc }: { doc: Doc }) {
     const t = setTimeout(() => setExternalTick(0), 5000);
     return () => clearTimeout(t);
   }, [externalTick]);
+
+  useEffect(() => {
+    if (!flashed) return;
+    const t = setTimeout(() => setFlashed(null), 2800);
+    return () => clearTimeout(t);
+  }, [flashed]);
 
   // Keeps the "Edited … ago" label fresh while the editor sits idle.
   useEffect(() => {
@@ -963,6 +997,18 @@ function EditorView({ doc }: { doc: Doc }) {
                   }}
                   onLangChange={(lang) =>
                     patchBlock(block.id, { lang: lang.trim() || undefined })
+                  }
+                  flash={
+                    flashed?.ids.has(block.id)
+                      ? {
+                          tick: flashed.tick,
+                          // One tag per run of changed blocks.
+                          by:
+                            i > 0 && flashed.ids.has(blocks[i - 1].id)
+                              ? "sync"
+                              : externalBy,
+                        }
+                      : null
                   }
                   onEmbedState={(json) =>
                     patchBlock(
