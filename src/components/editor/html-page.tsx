@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import { Code, Columns, Eye } from "@phosphor-icons/react";
+import { Code, Columns, Eye, Globe } from "@phosphor-icons/react";
 import { useWorkspace } from "@/lib/store";
 import type { Doc } from "@/lib/types";
 import {
@@ -9,6 +9,9 @@ import {
   withEmbedState,
 } from "@/lib/embed-state";
 import { HTML_PAGE_TEMPLATE, htmlPageDoc } from "@/lib/html-page";
+import { exportSite } from "@/lib/site-export";
+import { toast } from "@/lib/toast";
+import { handleFrameNavigation } from "@/lib/frame-links";
 
 type Mode = "preview" | "split" | "code";
 
@@ -69,6 +72,22 @@ export function HtmlPageView({
         <span className="hidden shrink-0 font-mono text-[10.5px] uppercase tracking-[0.1em] text-ink-3 sm:inline">
           HTML page
         </span>
+        <button
+          type="button"
+          onClick={() =>
+            exportSite(doc.id).then(
+              (saved) =>
+                saved &&
+                toast("Website exported — unzip it and upload the folder to any static host"),
+              (e) => toast(e instanceof Error ? e.message : String(e), { tone: "error" }),
+            )
+          }
+          title="Export this page (and every HTML page it links to) as a website"
+          className="flex h-7 shrink-0 items-center gap-1.5 rounded-[7px] border border-line bg-panel px-2.5 text-[11.5px] text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink"
+        >
+          <Globe size={13} />
+          Export site
+        </button>
         <div
           role="radiogroup"
           aria-label="View"
@@ -177,6 +196,7 @@ export function HtmlPageFrame({
     let timer: ReturnType<typeof setTimeout> | null = null;
     const onMessage = (e: MessageEvent) => {
       if (e.source !== iframeRef.current?.contentWindow) return;
+      if (handleFrameNavigation(e.data)) return;
       const json = (e.data as { cotenkSave?: unknown })?.cotenkSave;
       if (typeof json !== "string" || json.length > MAX_EMBED_STATE) return;
       if (timer) clearTimeout(timer);

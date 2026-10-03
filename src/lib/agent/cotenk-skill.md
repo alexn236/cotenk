@@ -1,15 +1,28 @@
 ---
 name: cotenk-workspace
-description: Use when working inside a CoTenk workspace folder (a directory of .md pages with "cotenk-id" frontmatter, e.g. ~/Documents/CoTenk) — creating, editing, renaming or moving pages, managing tasks (- [ ] with @owner and due:), or building interactive HTML embeds, HTML pages, charts and dashboards.
+description: Use when working inside a CoTenk workspace folder (a directory of .md pages with "cotenk-id" frontmatter, e.g. ~/Documents/CoTenk) — creating, editing, renaming or moving pages, managing tasks (- [ ] with @owner and due:), adding images, or building interactive embeds, dashboards, HTML apps and multi-page websites.
 ---
 
 # Working in a CoTenk workspace
 
-CoTenk is a productivity workspace. It stores Notion-style pages, tasks and interactive embeds as plain markdown files. Your current directory is the workspace root. Every page is a `.md` file here, and the CoTenk app watches the folder:
+CoTenk is a local-first workspace where people and AI agents share pages, tasks and context. It stores Notion-style pages, tasks and interactive embeds as plain markdown files. Your current directory is the workspace root. Every page is a `.md` file here, and the CoTenk app watches the folder:
 
-- You edit real files. Whatever you save shows up within about a second in the page the user has open, often while they watch.
+- You edit real files. Whatever you save shows up within about a second in the page the user has open, often while they watch — the blocks you wrote light up with an "agent" tag.
 - The user can undo your change with Ctrl+Z, but only while that page is open. Don't count on it. Edit carefully.
-- Pages sync to the cloud and the user's other devices. A deleted file deletes the page everywhere.
+- Everything stays on the user's machine — there is no cloud copy. A deleted file deletes the page (CoTenk keeps it under "Recently deleted" for 60 days, but don't rely on that).
+- Depending on the user's setting, your edits and commands are either shown to them as a diff to approve first, or applied right away.
+
+## 0. What you can build here
+
+| You want… | Make… | Section |
+| --- | --- | --- |
+| Notes, docs, plans, meeting notes | a markdown page | 1–2 |
+| A to-do someone (or an agent) owns | a task: `- [ ] text @owner due:YYYY-MM-DD` | 3 |
+| A chart, tracker, calculator or diagram inside a page | an interactive embed (HTML block) | 4 |
+| A picture in a page | an image file in `assets/` + `![caption](cotenk-image:assets/…)` | 2 |
+| An app, a game, a landing page, a dashboard that fills the page | an HTML page | 5 |
+| A real website with several pages | several HTML pages linked with `href="cotenk:page/<Title>"` — the user can export it as a static site | 5 |
+| Pages that reference each other | `[[Page title]]` links | 2 |
 
 ## 1. Files and frontmatter
 
@@ -27,13 +40,13 @@ pinned: false
 ...
 ```
 
-- **Never change, remove or copy `cotenk-id`.** It is the page's identity. If you rewrite a file without it, CoTenk deletes the page and adopts the file as a new one (new id, lost pin, cloud churn).
+- **Never change, remove or copy `cotenk-id`.** It is the page's identity. If you rewrite a file without it, CoTenk deletes the page and adopts the file as a new one (new id, lost pin, lost version history).
 - The frontmatter holds exactly four keys: `cotenk-id`, `title`, `folder`, `pinned`. Write values as plain text on one line, without quotes. CoTenk drops any other key.
 - The body starts after the frontmatter. For existing pages the title is **not** in the body, so "the top of the page" means the first line after the closing `---`. Don't add a `# Title` line to an existing page.
 - **Rename:** edit the `title:` line. CoTenk renames the file to the title's slug for you. If you rename the file yourself, CoTenk moves it back.
 - **Move to another folder:** set `folder:` to the folder's exact display name. Copy it from another page's `folder:` line. Case doesn't matter. An empty value means the top level. An unknown name creates a new folder. Don't move the file yourself, because CoTenk moves it back.
 - **Pin or unpin:** set `pinned: true` or `pinned: false`.
-- **Delete:** only when the user explicitly asks. Deleting the file deletes the page for good, in the cloud too.
+- **Delete:** only when the user explicitly asks. Deleting the file deletes the page.
 - Use UTF-8 **without BOM** and **LF** line endings. CoTenk tolerates CRLF and a BOM, but rewrites such files once to normalize them — which shows up as an extra change. Prefer your file-edit tools over shell redirects (Windows PowerShell 5.1 `Set-Content`/`Out-File` adds a BOM).
 
 ### Creating a page
@@ -65,17 +78,19 @@ Separate blocks with **one blank line**. Keep consecutive list items on consecut
 | Code | fenced with a language tag, e.g. three backticks followed by `ts` |
 | Divider | `---` on its own line |
 | Table | GFM table (header row, `| --- |` separator row) |
+| Image | `![caption](cotenk-image:assets/<file>)` on its own line; add `#w=480` after the path for a display width |
+| File | `[name](cotenk-file:assets/files/<file>)` on its own line |
 | Embed | raw HTML block, see section 4 |
 
 Avoid these, which don't render or don't survive editing:
 
 - **Inline HTML** inside markdown (`<br>`, `<span>`, `<details>`) shows as text. Only whole embed blocks render HTML.
-- **Images** (`![](...)`): external and relative images are blocked (imported pages may carry inline `data:` images — keep them as they are). Draw with an embed (inline SVG) instead.
+- **Relative image paths** (`![](pic.png)`) don't resolve. Images live in the workspace's `assets/` folder and are referenced as `cotenk-image:assets/<file>` (png, jpg, webp, gif). Save the file there first, then add the line. `https://` image URLs also render, but a file in `assets/` keeps working offline — prefer it. Imported pages may carry inline `data:` images — keep them as they are.
 - **Mermaid or math** fences show as plain code. Use an embed for diagrams.
 - **`####` and deeper** headings are left out of the contents panel. Stay within `#` to `###`.
 - **Nested lists** render flat, and the editor removes the indentation once the user edits the page. Prefer flat lists and use `###` subheadings to group.
 - **A heading or paragraph glued to a list** (no blank line) becomes one mixed block, and its checkboxes can't be clicked. Always put a blank line before a list.
-- There is no page-link syntax. Refer to other pages by their title.
+- Link pages with `[[Page title]]` only — markdown links to `.md` files don't resolve.
 
 ## 3. Tasks
 
@@ -119,8 +134,9 @@ Structure rules. The parser is strict:
 
 Sandbox limits (`sandbox="allow-scripts"` plus the app's content security policy):
 
-- **No external resources:** no CDNs, script or CSS URLs, web fonts, remote images, or `fetch`. Write plain inline JS and CSS. Draw with inline SVG or divs. Use `data:` URIs only if you must.
+- **Libraries from these CDNs only:** `cdn.jsdelivr.net`, `unpkg.com`, `cdnjs.cloudflare.com`, `esm.sh` and `cdn.tailwindcss.com` (scripts, styles, ES modules). Web fonts from Google Fonts (`fonts.googleapis.com` / `fonts.gstatic.com`). Images and video from any `https://` URL. Everything else — other hosts, `fetch` to APIs — is blocked. For a small widget, plain inline JS and SVG is still best: it loads instantly and works offline.
 - **Not available:** `localStorage`, `sessionStorage`, cookies, IndexedDB, `alert`/`confirm`/`prompt`, form submission (use button click handlers), popups or new windows, `eval`/`new Function`, and any access to the parent page or workspace files.
+- **Links:** `<a href="https://…">` opens in the user's browser. `<a href="cotenk:page/Page%20title">` opens that CoTenk page. From script: `cotenk.openUrl(url)` / `cotenk.openPage("Page title")`.
 - **Saved widget state:** call `cotenk.save(data)` with a small JSON-serializable value (under 64 KB) when the user changes something worth keeping (a slider, a checklist, a counter). On load, read it back from `cotenk.state` (null until the first save), e.g. `var s=(cotenk.state&&cotenk.state.scope)||42`. CoTenk stores it inside the block as a trailing `<script type="application/json" data-cotenk-state>` line — leave that line alone when editing an embed. Everything else resets on reload, so bake reference data into the script and keep the source of truth in the page's markdown.
 - **Sizing:** the frame height follows your content, from 80px up to 600px (taller content scrolls). Don't use `100vh` or `height:100%` on the root. Use fluid widths (flex or grid, percentages).
 
@@ -158,9 +174,9 @@ document.getElementById("sum").textContent=done+" of "+all+" tasks done";
 
 In the page, put the HTML as-is, without the code fence. Set text with `textContent`, not `innerHTML`, whenever the text comes from data.
 
-### HTML pages
+## 5. HTML pages, apps and websites
 
-When the user wants a whole page that is an app, a landing page, a game or anything beyond blocks, make an **HTML page**: a page whose entire body is one HTML document. CoTenk recognises it by its first tag and runs it full-size in a sandboxed frame; the user can switch between the page and its code.
+When the user wants a whole page that is an app, a landing page, a game, a dashboard or a website — anything beyond blocks — make an **HTML page**: a page whose entire body is one HTML document. CoTenk recognises it by its first tag and runs it full-size in a sandboxed frame; the user can switch between the page, its code, or both side by side.
 
 ```html
 # Pricing calculator
@@ -168,6 +184,8 @@ When the user wants a whole page that is an app, a landing page, a game or anyth
 <!doctype html>
 <html>
 <head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   body { max-width: 760px; margin: 0 auto; padding: 48px 32px; }
 </style>
@@ -179,12 +197,24 @@ When the user wants a whole page that is an app, a landing page, a game or anyth
 </html>
 ```
 
-- The body (after the frontmatter or the `# Title` line) must start with `<!doctype html>` or `<html>`. Nothing else may come before it, and no markdown after it.
-- Same rules as embeds: self-contained, no external URLs or CDNs, `var(--ck-…)` colors, `cotenk.save()` / `cotenk.state` for state, `textContent` for data. Blank lines are fine here.
-- The page background is already `var(--ck-canvas)` with `font:15px/1.6 system-ui`; set your own layout (max width, padding) in `body`.
+- The body (after the frontmatter or the `# Title` line) must start with `<!doctype html>` or `<html>`. Nothing else may come before it, and no markdown after it. Blank lines are fine.
+- Same sandbox as embeds (section 4): the listed CDNs, Google Fonts and https images work; `fetch` to other hosts, `localStorage` and popups don't. Keep state with `cotenk.save()` / `cotenk.state`. Set text from data with `textContent`.
+- The page background is already `var(--ck-canvas)` with `font:15px/1.6 system-ui`. For pages that belong to the workspace (tools, dashboards), use the `var(--ck-…)` colors so they follow light and dark mode. A website with its own brand may use its own palette.
+- Make it responsive (`<meta name="viewport">`, flexible layouts) — it may be shown in a narrow side panel or exported to the web.
 - Tasks and `[[links]]` inside an HTML page are not picked up — keep those on markdown pages.
 
-## 5. Working style
+### Multi-page websites
+
+A website is a set of HTML pages that link to each other:
+
+1. Make one HTML page per site page, e.g. "Acme", "Acme — Pricing", "Acme — About". Use distinctive titles so they don't clash with the user's other pages.
+2. Link them with `<a href="cotenk:page/Acme%20%E2%80%94%20Pricing">Pricing</a>` (the page title, URL-encoded). In CoTenk the link opens that page; external links open in the browser.
+3. Repeat the shared header, nav and footer on every page (there is no include mechanism), and keep the CSS identical so the pages feel like one site.
+4. Tell the user they can publish it: on the start page, **Export site** (or page menu → Export as website) saves a `.zip` with `index.html` plus one `.html` file per linked page, links rewritten to the files — ready for any static host (Netlify, GitHub Pages, Cloudflare Pages). `cotenk.save()` state then lives in the visitor's browser.
+
+Good defaults for a site: a hero with a clear headline and one call to action, sections with generous spacing, a real font from Google Fonts, and Tailwind (`<script src="https://cdn.tailwindcss.com"></script>`) or hand-written CSS — whichever you can keep consistent across pages.
+
+## 6. Working style
 
 This is a productivity tool. Help the user get things done and keep pages easy to scan.
 
@@ -194,7 +224,7 @@ This is a productivity tool. Help the user get things done and keep pages easy t
 - **Ask when the request is ambiguous** before restructuring or rewriting a large page. Which page? Which section? Replace or append?
 - **End each turn with 1–3 sentences:** what changed and on which page(s), by title. Mention anything you left open.
 
-## 6. Recipes
+## 7. Recipes
 
 - **Summarize:** add `## Summary` as the first block of the body (right below the frontmatter), with 3–5 bullets of key points and decisions. Don't touch the rest of the page.
 - **Continue writing:** read the whole page, match its tone and heading levels, and append at the end.
@@ -203,15 +233,16 @@ This is a productivity tool. Help the user get things done and keep pages easy t
 - **Weekly review:** find the pages changed in the last 7 days (by file modification time), then fill `## Wins`, `## What didn't go well` and `## Next week` (3 prioritized tasks). List overdue open tasks by name.
 - **Dashboard page:** gather the data from the workspace (tasks by owner or due date, numbers from pages) and write a short intro line with `_Updated YYYY-MM-DD_`. Add one or two embeds with the data baked in, plus a `## Highlights` bullet list and a `## Watch list` of tasks. Embeds can't read the workspace live, so re-run the recipe to refresh.
 - **Add a diagram:** build a flow, timeline or chart embed (section 4) from the page's content and place it right after the section it illustrates.
+- **Landing page / website:** ask (or infer) the product, audience and tone, then build it as HTML pages (section 5): a start page with hero, features, social proof and a call to action, plus linked subpages if asked. Finish by telling the user about **Export site**.
 - **Polish:** tighten the wording and structure, but keep every fact, task, owner, due date and embed. Never change a task's checked state.
 
-## 7. Don't
+## 8. Don't
 
 - Don't edit, remove or duplicate `cotenk-id`, and don't add frontmatter keys.
 - Don't rename or move page files by hand. Edit `title:` or `folder:` instead.
 - Don't delete files, pages or sections the user didn't ask you to remove.
 - Don't tick tasks you didn't complete, and don't reassign owners unless asked.
-- Don't use external URLs, CDNs or storage APIs in embeds or HTML pages, or blank lines in embeds.
-- Don't use inline HTML, images, mermaid or nested lists in markdown.
+- Don't load anything from hosts other than the allowed CDNs, Google Fonts and https images, don't use storage APIs in embeds or HTML pages, and don't put blank lines in embeds.
+- Don't use inline HTML, mermaid or nested lists in markdown, or relative image paths (use `cotenk-image:assets/…`).
 - Don't create folders more than one level deep, and don't put `.md` files outside the workspace or in dot-folders.
 - Don't rewrite a whole page when a targeted edit will do.

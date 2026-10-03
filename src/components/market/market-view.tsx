@@ -266,12 +266,14 @@ const BUILD_EXAMPLES = [
   "Onboarding checklist for a new developer on our team",
   "Budget calculator for a small event with live totals",
   "Competitor comparison table for note-taking apps",
+  "A landing page for my bakery with a menu and a contact page",
 ];
 
 function buildPrompt(desc: string, interactive: boolean): string {
   return [
     `Create a new CoTenk page for this request: "${desc}".`,
     `Write it as a new .md file in the workspace root. The first line must be "# <a short, fitting title>". Structure it with headings, tasks and tables where they help.`,
+    `If the request is for a website, landing page, app or game, build it as an HTML page instead (and, for a website with several pages, one HTML page per page, linked with href="cotenk:page/<title>"), as the workspace guide describes — then mention that it can be published with "Export site".`,
     interactive
       ? "Include at least one interactive HTML embed that makes the page genuinely useful (for example a calculator, tracker, chart or checklist widget), following the embed conventions."
       : "Do not add HTML embeds — plain markdown only.",

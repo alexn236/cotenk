@@ -9,6 +9,7 @@ import {
   CopySimple,
   FilePlus,
   FolderSimple,
+  Globe,
   Lightning,
   PushPin,
   PushPinSlash,
@@ -17,10 +18,12 @@ import {
 } from "@phosphor-icons/react";
 import { trashDoc, useWorkspace } from "@/lib/store";
 import { toast } from "@/lib/toast";
+import { isHtmlPage } from "@/lib/html-page";
+import { exportSite } from "@/lib/site-export";
 import type { Doc } from "@/lib/types";
 
 /** Approximate height, used by callers to flip menus near the bottom. */
-export const PAGE_MENU_HEIGHT = 310;
+export const PAGE_MENU_HEIGHT = 340;
 
 const ITEM =
   "flex h-7 w-full items-center gap-2 rounded-[6px] px-2 text-left text-[12.5px] text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink";
@@ -174,6 +177,18 @@ export function PageMenuItems({
         label="Version history"
         onClick={done(() => setHistoryDocId(doc.id))}
       />
+      {isHtmlPage(doc.content) && (
+        <MenuButton
+          icon={Globe}
+          label="Export as website"
+          onClick={done(() => {
+            exportSite(doc.id).then(
+              (saved) => saved && toast("Website exported — unzip it and upload the folder to any static host"),
+              (e) => toast(e instanceof Error ? e.message : String(e), { tone: "error" }),
+            );
+          })}
+        />
+      )}
       <div className="my-1 h-px bg-line-soft" />
       <MenuButton
         icon={Trash}

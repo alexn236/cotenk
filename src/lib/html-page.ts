@@ -21,6 +21,7 @@ export const HTML_PAGE_TEMPLATE = `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   body { max-width: 720px; margin: 0 auto; padding: 56px 32px; }
   h1 { font-size: 30px; letter-spacing: -0.02em; margin: 0 0 8px; }
@@ -53,9 +54,14 @@ export const HTML_PAGE_TEMPLATE = `<!doctype html>
  * (zero specificity, so the page's own CSS wins) and the cotenk API go
  * into <head>.
  */
-export function htmlPageDoc(content: string, scheme: string): string {
+export function htmlPageDoc(
+  content: string,
+  scheme: string,
+  /** Replaces the in-app cotenk API (exported sites bring their own). */
+  api?: (state: string | null) => string,
+): string {
   const { body, state } = splitEmbedState(content);
-  const inject = `<style>${embedThemeCss(scheme)}:where(body){margin:0;color:var(--ck-ink);background:var(--ck-canvas);font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}</style>${embedApiScript(state)}`;
+  const inject = `<style>${embedThemeCss(scheme)}:where(body){margin:0;color:var(--ck-ink);background:var(--ck-canvas);font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}</style>${(api ?? embedApiScript)(state)}`;
   const head = /<head(\s[^>]*)?>/i.exec(body);
   if (head) {
     const at = head.index + head[0].length;

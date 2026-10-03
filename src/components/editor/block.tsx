@@ -39,6 +39,7 @@ import { FileBody, ImageBody } from "./attachment-blocks";
 import { useSuggest } from "@/components/ui/use-suggest";
 import { autosizeTextarea, useIsomorphicLayoutEffect } from "./utils";
 import { celebrate } from "@/lib/celebrate";
+import { handleFrameNavigation } from "@/lib/frame-links";
 
 function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(
@@ -716,6 +717,7 @@ export function EmbedFrame({
     let saveTimer: ReturnType<typeof setTimeout> | null = null;
     const onMessage = (e: MessageEvent) => {
       if (e.source !== iframeRef.current?.contentWindow) return;
+      if (handleFrameNavigation(e.data)) return;
       const data = e.data as { cotenkEmbedHeight?: unknown; cotenkSave?: unknown };
       const h = data?.cotenkEmbedHeight;
       if (typeof h === "number" && Number.isFinite(h)) {

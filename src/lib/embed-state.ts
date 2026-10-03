@@ -40,7 +40,10 @@ export const stripEmbedState = (text: string) =>
 
 /**
  * Bootstrap injected before the embed's own HTML: exposes `cotenk.state`
- * (the saved value or null) and `cotenk.save(data)`.
+ * (the saved value or null), `cotenk.save(data)`, `cotenk.openPage(title)`
+ * and `cotenk.openUrl(url)`. Links are bridged too: `href="cotenk:page/
+ * <Title>"` opens that CoTenk page (multi-page sites), http(s)/mailto
+ * links open in the system browser — the sandbox can't navigate itself.
  */
 export function embedApiScript(state: string | null): string {
   let initial = "null";
@@ -52,7 +55,7 @@ export function embedApiScript(state: string | null): string {
       /* corrupt state — start fresh */
     }
   }
-  return `<script>window.cotenk={state:${initial},save:function(d){this.state=d;try{parent.postMessage({cotenkSave:JSON.stringify(d)},"*")}catch(e){}}};</script>`;
+  return `<script>(function(){function post(m){try{parent.postMessage(m,"*")}catch(e){}}window.cotenk={state:${initial},save:function(d){this.state=d;post({cotenkSave:JSON.stringify(d)})},openPage:function(t){post({cotenkOpenPage:String(t)})},openUrl:function(u){post({cotenkOpenUrl:String(u)})}};document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a[href]"):null;if(!a)return;var h=a.getAttribute("href")||"";if(h.indexOf("cotenk:page/")===0){e.preventDefault();var t=h.slice(12);try{t=decodeURIComponent(t)}catch(x){}post({cotenkOpenPage:t.split("#")[0]})}else if(/^(https?:|mailto:)/i.test(h)){e.preventDefault();post({cotenkOpenUrl:h})}},true)})();</script>`;
 }
 
 /** Theme tokens exposed to embeds as --ck-* CSS variables. */
