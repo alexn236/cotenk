@@ -1,11 +1,11 @@
-# Builds the desktop app for Windows, macOS and Linux when a version tag
-# (v0.1.0, v0.2.0, …) is pushed, and attaches the installers to a draft
-# GitHub release. Review the draft, then press "Publish release".
-#
-#   git tag v0.1.0 && git push origin v0.1.0
+# Builds the desktop app for Windows, macOS and Linux and publishes it as
+# a GitHub release v<version> — run it from the Actions tab ("Run
+# workflow") or push a version tag (git tag v0.2.0 && git push origin
+# v0.2.0). The installers are collected on a draft first; once every
+# platform built, the last job publishes the release.
 #
 # The app version comes from src-tauri/tauri.conf.json — bump it there
-# (and in package.json / src-tauri/Cargo.toml) before tagging.
+# (and in package.json / src-tauri/Cargo.toml) before releasing.
 name: Release
 
 on:
@@ -80,3 +80,16 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish the draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(jq -r .version src-tauri/tauri.conf.json)
+          gh release edit "v$version" --repo "$GITHUB_REPOSITORY" --draft=false --latest

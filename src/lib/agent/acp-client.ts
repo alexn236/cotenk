@@ -180,7 +180,7 @@ class AcpClient {
     const init = (await this.request("initialize", {
       protocolVersion: 1,
       clientCapabilities: {},
-      clientInfo: { name: "cotenk", version: "0.1.0" },
+      clientInfo: { name: "cotenk", version: __APP_VERSION__ },
     })) as { agentCapabilities?: { promptCapabilities?: { image?: boolean } } };
     this.imageSupport =
       init?.agentCapabilities?.promptCapabilities?.image === false ? false : null;

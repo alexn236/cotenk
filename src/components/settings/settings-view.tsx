@@ -378,7 +378,7 @@ function AboutSection() {
       <div className="mt-1 text-[12.5px] text-ink-3">
         Think together. Work together.
       </div>
-      <div className="mt-3 font-mono text-[11px] text-ink-3">v0.1.0</div>
+      <div className="mt-3 font-mono text-[11px] text-ink-3">v{__APP_VERSION__}</div>
 
       <p className="mt-4 max-w-[420px] text-[12px] leading-relaxed text-ink-3">
         Open source. Everything — pages, chats, settings — stays on this
