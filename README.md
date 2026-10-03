@@ -1,13 +1,55 @@
+<div align="center">
+
 # CoTenk
 
-Think together. Work together. — An open, local-first workspace where
-people and AI agents share documents, tasks and context.
+**Think together. Work together.**
+
+An open-source, local-first workspace where people and AI agents share
+documents, tasks and context. Your agent writes into the same pages you do.
+
+No account · no server · no telemetry · plain `.md` files · bring your own agent
+(Claude Code or Devin CLI)
+
+![An agent writing into a page — every block it wrote lights up](docs/screenshots/agent-edit.png)
+
+</div>
+
+## Why CoTenk
+
+- **Your notes stay yours.** Every page is a plain markdown file in your
+  workspace folder (`~/Documents/CoTenk` by default). Back it up, put it
+  in git, open it in Obsidian or any editor.
+- **Agents work on the real files.** Claude Code or Devin CLI edit the
+  `.md` files on disk. The open page follows along live, every block an
+  agent wrote lights up, and Ctrl+Z takes it back.
+- **One place for pages, tasks and agents.** Any `- [ ]` on any page is
+  a task you can hand to an agent. It ticks the task off in the page
+  itself.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/welcome.png" alt="Welcome screen with a live demo of an agent writing a page"><br><sub><b>First start</b> — a live demo, then theme and agent setup. No account.</sub></td>
+    <td width="50%"><img src="docs/screenshots/editor.png" alt="Block editor with a live chart embed and tasks"><br><sub><b>Pages</b> — a block editor on plain markdown, with interactive HTML embeds.</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/agents.png" alt="Chat with Claude Code that read and wrote workspace files"><br><sub><b>Agents</b> — chat with Claude Code or Devin CLI; they read and write your pages.</sub></td>
+    <td><img src="docs/screenshots/graph.png" alt="Graph of pages, folders, people and agents"><br><sub><b>Graph</b> — pages, folders, people and agents as a live map.</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/tasks-board.png" alt="Task board grouped by due date"><br><sub><b>Tasks</b> — every checkbox across all pages, as a list or a board by due date.</sub></td>
+    <td><img src="docs/screenshots/home.png" alt="Home with greeting, quick actions, checklist and open tasks"><br><sub><b>Home</b> — quick actions, pinned and recent pages, your open tasks.</sub></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/screenshots/templates.png" alt="Template gallery"><br><sub><b>Templates</b> — ready pages, some interactive, plus “Build with AI”: describe a page, your agent builds it.</sub></td>
+  </tr>
+</table>
+
+## How it works
 
 Desktop app built with **Tauri + React + TypeScript + Tailwind CSS**.
-There is no account, no server and no telemetry: pages, chats, history
-and settings stay on your machine. In the desktop app every page is a
-plain `.md` file in your workspace folder (`~/Documents/CoTenk` by
-default), so you can back it up, put it in git or open it in any editor.
+Pages, chats, history and settings stay on your machine.
 
 Agents run locally through the [Agent Client Protocol](https://agentclientprotocol.com)
 (ACP). You bring your own agent:
@@ -21,6 +63,19 @@ speaks JSON-RPC over it. Each chat is bound to one agent; Settings →
 Agents shows the connection state and the default. On first start the
 desktop app asks which agents to use and walks through setting each one
 up (`src/components/agents/agent-onboarding.tsx`).
+
+## Quick start
+
+```bash
+git clone https://github.com/alexn236/cotenk.git
+cd cotenk
+npm install
+npm run tauri:dev    # desktop app (needs Rust + Tauri prerequisites)
+npm run dev          # or: browser only, without agents
+```
+
+Then connect an agent from Home → "Connect an agent" — details under
+[Setting up an agent](#setting-up-an-agent).
 
 ## What's inside
 

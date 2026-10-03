@@ -50,6 +50,10 @@ export function parseTaskMeta(raw: string): {
     .replace(MENTION_RE, " ")
     // Inline markdown reads as noise in plain task lists.
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    // [[Page]] / [[Page|label]] read as the title (or label).
+    .replace(/\[\[([^[\]|#]+)(?:#[^[\]|]*)?(?:\|([^[\]]+))?\]\]/g, (_m, t: string, l?: string) =>
+      (l ?? t).trim(),
+    )
     .replace(/(\*\*|__|`)(.+?)\1/g, "$2")
     .replace(/\s{2,}/g, " ")
     .trim();
