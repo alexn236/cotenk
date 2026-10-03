@@ -9,12 +9,13 @@
 One space for your notes, tasks and AI agents. Your agent doesn't chat *about*
 your work — it opens the page and writes into it, while you watch.
 
+[![Latest release](https://img.shields.io/github/v/release/alexn236/cotenk?color=a8641c&label=release)](https://github.com/alexn236/cotenk/releases/latest)
 [![MIT License](https://img.shields.io/badge/license-MIT-a8641c.svg)](LICENSE)
 [![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-24C8DB.svg)](https://tauri.app)
 [![Agents: Claude Code · Devin](https://img.shields.io/badge/agents-Claude%20Code%20%C2%B7%20Devin%20CLI-e2a05c.svg)](#-why-cotenk)
 [![Local-first](https://img.shields.io/badge/local--first-no%20account-232a20.svg)](#-why-cotenk)
 
-[Quick start](#-quick-start) · [Why CoTenk](#-why-cotenk) · [Features](#-what-you-get) · [Docs](#-docs)
+[Download](#-download) · [Why CoTenk](#-why-cotenk) · [Features](#-what-you-get) · [Build from source](#-build-from-source) · [Docs](#-docs)
 
 <br>
 
@@ -64,20 +65,40 @@ CoTenk flips that:
   every change as a diff, undo with one key.
 - **Tasks everywhere** — any `- [ ]` on any page is a task. `@claude` it
   and the agent does it. List or kanban board by due date.
+- **Read along** — the page the agent is writing opens next to the chat,
+  so you can follow every change as it happens.
 - **Interactive pages** — agents build widgets (charts, trackers, timers)
   as plain HTML right inside your notes.
+- **Websites & apps** — ask for a landing page or a small app and get a
+  real, multi-page site; **Export site** turns it into a folder you can
+  put on any static host.
 - **Graph** — your pages, folders, people and agents as a live map.
 - **Build with AI** — describe a page, your agent builds it. Or start
   from a template.
 - **Import in seconds** — drop a Notion export or an Obsidian vault on
   the window.
+- **Skills & MCP** — give your agents extra skills and MCP servers that
+  only exist inside CoTenk.
 - **Yours to keep** — version history, recently deleted, one-click
   export of everything.
 
-## 🚀 Quick start
+## 📥 Download
 
-**Download** the app for Windows, macOS or Linux from
-[Releases](https://github.com/alexn236/cotenk/releases/latest) — or build it yourself:
+| Platform | Get it |
+| --- | --- |
+| Windows | `CoTenk_x.y.z_x64-setup.exe` |
+| macOS (Apple Silicon / Intel) | `CoTenk_x.y.z_aarch64.dmg` / `CoTenk_x.y.z_x64.dmg` |
+| Linux | `.AppImage` or `.deb` |
+
+All files are on the **[latest release](https://github.com/alexn236/cotenk/releases/latest)**.
+Then click **Connect an agent** on Home — CoTenk installs Claude Code (or
+finds Devin CLI) and walks you through sign-in. That's it.
+
+> The builds aren't code-signed yet. On Windows, SmartScreen may warn —
+> click *More info → Run anyway*. On macOS, right-click the app → *Open*
+> the first time.
+
+## 🔧 Build from source
 
 ```bash
 git clone https://github.com/alexn236/cotenk.git
@@ -86,16 +107,21 @@ npm install
 npm run tauri:dev
 ```
 
-Then click **Connect an agent** on Home — CoTenk installs Claude Code (or
-finds Devin CLI) and walks you through sign-in. That's it.
-
-> Needs Node.js, Rust and the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
-> Just want to look around? `npm run dev` runs it in the browser (without agents).
+Needs Node.js, Rust and the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
+Just want to look around? `npm run dev` runs it in the browser (without
+agents). More in [Development](#-docs).
 
 ## 🤝 Contributing
 
-CoTenk is early and moving fast — issues, ideas and PRs are welcome. If
-it's useful to you, a ⭐ helps other people find it.
+CoTenk is early and moving fast — that's the best time to shape it.
+
+- Found a bug or have an idea? [Open an issue](https://github.com/alexn236/cotenk/issues/new).
+- Want to fix something? Fork, branch, and open a pull request against
+  `main` — `npm run typecheck` and `npm run lint` should pass.
+- New to the code? The *Development* section under [Docs](#-docs) has the
+  project layout.
+
+If CoTenk is useful to you, a ⭐ helps other people find it.
 
 ## 📚 Docs
 
@@ -169,8 +195,9 @@ login`, or "Connect" in Settings → Agents). `DEVIN_CLI` overrides the
 binary. An API key can also be pasted in Settings → Agents.
 
 Agent edits and commands are **reviewed** by default: the app shows the
-change as a block diff and asks before it lands (Settings → Agents →
-Agent changes → Auto-approve turns that off). Reads never ask.
+change as a block diff and asks before it lands. You pick Review or
+Auto-approve during onboarding and can switch any time in Settings →
+Agents → Agent changes. Reads never ask.
 
 #### Skills & MCP servers
 
