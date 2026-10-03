@@ -144,9 +144,26 @@ function ChatRow({ chat, index = 0 }: { chat: AgentChat; index?: number }) {
   const selectChat = useAgent((s) => s.selectChat);
   const togglePinChat = useAgent((s) => s.togglePinChat);
   const deleteChat = useAgent((s) => s.deleteChat);
+  const renameChat = useAgent((s) => s.renameChat);
 
   const dotsRef = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<MenuPos | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState(chat.title);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (renaming) inputRef.current?.select();
+  }, [renaming]);
+
+  const startRename = () => {
+    setDraft(chat.title);
+    setRenaming(true);
+  };
+  const commitRename = () => {
+    if (draft.trim() && draft.trim() !== chat.title) renameChat(chat.id, draft.trim());
+    setRenaming(false);
+  };
 
   useEffect(() => {
     if (!menu) return;
@@ -160,10 +177,10 @@ function ChatRow({ chat, index = 0 }: { chat: AgentChat; index?: number }) {
   const openMenu = () => {
     const rect = dotsRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const flip = rect.bottom + 6 + 80 > window.innerHeight;
+    const flip = rect.bottom + 6 + 110 > window.innerHeight;
     setMenu({
       left: Math.max(8, Math.round(rect.right) - MENU_W),
-      top: flip ? Math.round(rect.top) - 86 : Math.round(rect.bottom) + 6,
+      top: flip ? Math.round(rect.top) - 116 : Math.round(rect.bottom) + 6,
       flip,
     });
   };
@@ -192,9 +209,32 @@ function ChatRow({ chat, index = 0 }: { chat: AgentChat; index?: number }) {
         />
       )}
       <Icon size={15} className="shrink-0 text-ink-3" />
-      <span className="flex-1 truncate">
-        {chat.title.trim() === "" ? "New chat" : chat.title}
-      </span>
+      {renaming ? (
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.currentTarget.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commitRename();
+            if (e.key === "Escape") setRenaming(false);
+          }}
+          onClick={(e) => e.stopPropagation()}
+          aria-label="Chat name"
+          className="h-5 w-full min-w-0 rounded-[4px] border border-line bg-panel-2 px-1 text-[12.5px] text-ink outline-none focus:border-accent-line"
+        />
+      ) : (
+        <span
+          className="flex-1 truncate"
+          title="Double-click to rename"
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            startRename();
+          }}
+        >
+          {chat.title.trim() === "" ? "New chat" : chat.title}
+        </span>
+      )}
       {running ? (
         <span
           title={`${AGENTS[chat.agent].name} is working`}
@@ -257,6 +297,18 @@ function ChatRow({ chat, index = 0 }: { chat: AgentChat; index?: number }) {
                     menu.flip ? "origin-bottom-right" : "origin-top-right"
                   }`}
                 >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenu(null);
+                      startRename();
+                    }}
+                    className="flex h-7 w-full items-center gap-2 rounded-[6px] px-2 text-[12.5px] text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink"
+                  >
+                    <PencilSimple size={14} />
+                    Rename
+                  </button>
                   <button
                     type="button"
                     role="menuitem"

@@ -86,16 +86,46 @@ export function DocEditor() {
   return <EditorView key={doc.id} doc={doc} />;
 }
 
-function EditorView({ doc }: { doc: Doc }) {
+/**
+ * The same editor as a side panel (next to an agent chat): no contents
+ * card and no Ask-agent button — the chat beside it is the agent. Remount
+ * with `key={doc.id}` when the page changes.
+ */
+export function PageEditor({ doc, flashFrom }: { doc: Doc; flashFrom?: string }) {
+  return <EditorView doc={doc} embedded flashFrom={flashFrom} />;
+}
+
+/** Ids of blocks in `blocks` whose markdown isn't in `before`. */
+function changedBlockIds(before: string, blocks: BlockData[]): Set<string> {
+  const seen = new Set(parseBlocks(before).map(blockKey));
+  return new Set(blocks.filter((b) => !seen.has(blockKey(b))).map((b) => b.id));
+}
+
+function EditorView({
+  doc,
+  embedded = false,
+  flashFrom,
+}: {
+  doc: Doc;
+  embedded?: boolean;
+  /**
+   * The page's content right before an agent changed it — opened because
+   * of that change, the changed blocks glow straight away.
+   */
+  flashFrom?: string;
+}) {
   const folders = useWorkspace((s) => s.folders);
   const contentsOpen = useWorkspace((s) => s.contentsOpen);
   const toggleContents = useWorkspace((s) => s.toggleContents);
   const renameDoc = useWorkspace((s) => s.renameDoc);
   const updateDocContent = useWorkspace((s) => s.updateDocContent);
 
-  const [blocks, setBlocks] = useState<BlockData[]>(() =>
-    parseBlocks(doc.content),
-  );
+  const [initial] = useState(() => {
+    const parsed = parseBlocks(doc.content);
+    const ids = flashFrom === undefined ? null : changedBlockIds(flashFrom, parsed);
+    return { blocks: parsed, flash: ids && ids.size > 0 ? ids : null };
+  });
+  const [blocks, setBlocks] = useState<BlockData[]>(initial.blocks);
   const [editingId, setEditingId] = useState<string | null>(null);
   // Undo/redo history: snapshots capture blocks + title + caret so a
   // restore lands the user back where the edit happened. Consecutive
@@ -121,10 +151,12 @@ function EditorView({ doc }: { doc: Doc }) {
   // Bumped whenever the page changes outside the editor (agent, disk,
   // another device); drives the short "Updated by …" notice.
   const [externalTick, setExternalTick] = useState(0);
-  const [externalBy, setExternalBy] = useState<"agent" | "sync">("sync");
+  const [externalBy, setExternalBy] = useState<"agent" | "sync">(
+    initial.flash ? "agent" : "sync",
+  );
   /** Blocks that just changed outside the editor — they glow briefly. */
   const [flashed, setFlashed] = useState<{ ids: Set<string>; tick: number } | null>(
-    null,
+    initial.flash ? { ids: initial.flash, tick: 1 } : null,
   );
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -229,6 +261,17 @@ function EditorView({ doc }: { doc: Doc }) {
     const t = setTimeout(() => setFlashed(null), 2800);
     return () => clearTimeout(t);
   }, [flashed]);
+
+  // Opened because of an agent change: bring the first changed block into view.
+  useEffect(() => {
+    const first = initial.blocks.find((b) => initial.flash?.has(b.id))?.id;
+    if (!first) return;
+    requestAnimationFrame(() => {
+      scrollRef.current
+        ?.querySelector(`[data-block-id="${first}"]`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  }, [initial]);
 
   // Keeps the "Edited … ago" label fresh while the editor sits idle.
   useEffect(() => {
@@ -723,7 +766,9 @@ function EditorView({ doc }: { doc: Doc }) {
 
   return (
     <div
-      className="relative flex h-dvh min-w-0 flex-1 flex-col bg-canvas"
+      className={`relative flex min-w-0 flex-1 flex-col bg-canvas ${
+        embedded ? "h-full" : "h-dvh"
+      }`}
       onKeyDown={onEditorKeyDown}
     >
       {/* top bar */}
@@ -805,6 +850,7 @@ function EditorView({ doc }: { doc: Doc }) {
               </motion.span>
             )}
           </AnimatePresence>
+          {!embedded && (
           <div className="relative">
             <button
               type="button"
@@ -826,6 +872,7 @@ function EditorView({ doc }: { doc: Doc }) {
               onClose={() => setMenuOpen(null)}
             />
           </div>
+          )}
           <div className="relative">
             <button
               type="button"
@@ -863,7 +910,7 @@ function EditorView({ doc }: { doc: Doc }) {
               )}
             </AnimatePresence>
           </div>
-          {!htmlPage && (
+          {!htmlPage && !embedded && (
             <button
               type="button"
               onClick={() =>
@@ -932,7 +979,11 @@ function EditorView({ doc }: { doc: Doc }) {
             void addImages(files, editingId);
           }}
         >
-          <div className="mx-auto w-full max-w-[720px] px-6 py-12 md:px-16">
+          <div
+            className={`mx-auto w-full max-w-[720px] ${
+              embedded ? "px-8 py-8" : "px-6 py-12 md:px-16"
+            }`}
+          >
             <textarea
               ref={titleRef}
               rows={1}
@@ -1041,7 +1092,7 @@ function EditorView({ doc }: { doc: Doc }) {
       )}
 
       <ContentsPanel
-        open={showContents && !htmlPage}
+        open={showContents && !htmlPage && !embedded}
         scrollRoot={scrollRef}
         docContent={doc.content}
       />

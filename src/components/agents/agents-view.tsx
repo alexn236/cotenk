@@ -8,6 +8,8 @@ import {
   Lightning,
   PaperPlaneRight,
   Paperclip,
+  PencilSimple,
+  SidebarSimple,
   Plugs,
   PushPin,
   Square,
@@ -47,6 +49,34 @@ import { referenceContext } from "@/lib/suggest";
 import { slashContext } from "@/lib/slash";
 import { useExtensions } from "@/lib/extensions";
 import { newId } from "@/lib/ids";
+import { PageSidePanel } from "./page-side-panel";
+
+const PANEL_OPEN_KEY = "cotenk-agents-panel-open";
+const PANEL_DOC_KEY = "cotenk-agents-panel-doc";
+
+function readPanelOpen(): boolean {
+  try {
+    const v = localStorage.getItem(PANEL_OPEN_KEY);
+    if (v !== null) return v === "1";
+  } catch {
+    /* storage unavailable */
+  }
+  return typeof window !== "undefined" && window.innerWidth >= 1200;
+}
+
+function readPanelDoc(): string | null {
+  const { docs, activeDocId } = useWorkspace.getState();
+  let stored: string | null = null;
+  try {
+    stored = localStorage.getItem(PANEL_DOC_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+  const exists = (id: string | null) => !!id && docs.some((d) => d.id === id);
+  if (exists(stored)) return stored;
+  if (exists(activeDocId)) return activeDocId;
+  return docs[0]?.id ?? null;
+}
 
 const MAX_ATTACHMENTS = 5;
 
@@ -141,6 +171,25 @@ export function AgentsView() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
+  // The page next to the chat — read along while the agent writes.
+  const [panelOpen, setPanelOpen] = useState(readPanelOpen);
+  const [panelDoc, setPanelDoc] = useState<string | null>(readPanelDoc);
+  const togglePanel = (open: boolean) => {
+    setPanelOpen(open);
+    try {
+      localStorage.setItem(PANEL_OPEN_KEY, open ? "1" : "0");
+    } catch {
+      /* storage unavailable */
+    }
+  };
+  const showPanelDoc = (id: string) => {
+    setPanelDoc(id);
+    try {
+      localStorage.setItem(PANEL_DOC_KEY, id);
+    } catch {
+      /* storage unavailable */
+    }
+  };
 
   const running = status === "running" || status === "starting";
   // One turn at a time: another chat's turn blocks this composer.
@@ -264,408 +313,431 @@ export function AgentsView() {
     "grid h-6 w-6 place-items-center rounded-[6px] text-ink-3 transition-colors duration-150 ease-out-expo hover:bg-hover hover:text-ink-2";
 
   return (
-    <div className="relative flex h-dvh min-w-0 flex-1 flex-col bg-canvas">
-      <header className="flex h-11 shrink-0 items-center gap-2 border-b border-line-soft px-4">
-        {chat ? (
-          editingTitle ? (
-            <input
-              ref={titleRef}
-              value={titleDraft}
-              onChange={(e) => setTitleDraft(e.currentTarget.value)}
-              onBlur={commitTitle}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commitTitle();
-                if (e.key === "Escape") setEditingTitle(false);
-              }}
-              aria-label="Chat title"
-              className="min-w-0 max-w-[480px] flex-1 rounded-[4px] border border-line bg-panel-2 px-1.5 py-0.5 text-[12.5px] text-ink outline-none focus:border-accent-line"
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setTitleDraft(chat.title);
-                setEditingTitle(true);
-              }}
-              title="Rename chat"
-              className="min-w-0 max-w-[480px] truncate rounded-[4px] px-1 text-[12.5px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink"
-            >
-              {chat.title}
-            </button>
-          )
-        ) : (
-          <span className="text-[12.5px] font-medium text-ink-2">
-            Agents
-          </span>
-        )}
-        <span
-          className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-line bg-panel-2 px-2 py-0.5 text-[11px] text-ink-3"
-          title={`${agentName} · ${meta.label}`}
-        >
-          <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
-          {agentName}
-        </span>
-
-        <div className="ml-auto flex shrink-0 items-center gap-1">
-          {chat && (
-            <>
-              {/* project assign */}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setMenu((m) => (m === "project" ? null : "project"))
-                  }
-                  aria-label="Move to project"
-                  title={
-                    chat.projectId
-                      ? `Project: ${projects.find((p) => p.id === chat.projectId)?.name}`
-                      : "Move to project"
-                  }
-                  className={`${iconBtn} ${chat.projectId ? "text-accent" : ""}`}
-                >
-                  <Folder size={15} />
-                </button>
-                <HeaderMenu
-                  open={menu === "project"}
-                  onClose={() => setMenu(null)}
-                >
-                  <MenuItem
-                    active={chat.projectId === null}
-                    label="No project"
-                    onClick={() => {
-                      assignChat(chat.id, null);
-                      setMenu(null);
-                    }}
-                  />
-                  {projects.map((p) => (
-                    <MenuItem
-                      key={p.id}
-                      active={chat.projectId === p.id}
-                      label={p.name}
-                      onClick={() => {
-                        assignChat(chat.id, p.id);
-                        setMenu(null);
-                      }}
-                    />
-                  ))}
-                  {projects.length === 0 && (
-                    <p className="px-3 py-2 text-[11.5px] text-ink-3">
-                      No projects yet — create one in the sidebar.
-                    </p>
-                  )}
-                </HeaderMenu>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => togglePinChat(chat.id)}
-                aria-label={chat.pinned ? "Unpin chat" : "Pin chat"}
-                title={chat.pinned ? "Unpin" : "Pin"}
-                className={`${iconBtn} ${chat.pinned ? "text-accent" : ""}`}
-              >
-                <PushPin
-                  size={15}
-                  weight={chat.pinned ? "fill" : "regular"}
-                />
-              </button>
-              <button
-                type="button"
-                onClick={() => deleteChat(chat.id)}
-                aria-label="Delete chat"
-                title="Delete chat"
-                className={`${iconBtn} hover:text-danger`}
-              >
-                <Trash size={15} />
-              </button>
-            </>
-          )}
-        </div>
-      </header>
-
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-6 py-8 md:px-16">
-          {messages.length === 0 && (
-            <motion.div
-              initial={reduceMotion ? false : { opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-              className="flex flex-col items-center gap-4 py-16 text-center"
-            >
-              <div className="grid h-11 w-11 place-items-center rounded-[12px] border border-line bg-panel">
-                <Lightning size={20} className="text-accent" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-ink-2">
-                  Your workspace agent
-                </p>
-                <p className="mt-1.5 max-w-[400px] text-[12.5px] leading-relaxed text-ink-3">
-                  Runs locally and reads and writes the same pages you do.
-                  Ask it to draft, restructure, extract tasks or build
-                  interactive widgets — you watch the changes land.
-                </p>
-              </div>
-              {!desktop ? (
-                <p className="max-w-[380px] rounded-[10px] border border-dashed border-line px-4 py-3 text-[12.5px] leading-relaxed text-ink-3">
-                  {DESKTOP_ONLY_MESSAGE} Pages, tasks and templates work
-                  everywhere.
-                </p>
-              ) : (
-                <div className="flex w-full max-w-[360px] flex-col items-center gap-2">
-                  <div className="w-full">
-                    <AgentSwitch
-                      value={agent}
-                      onChange={(k) =>
-                        chat ? setChatAgent(chat.id, k) : setDefaultAgent(k)
-                      }
-                    />
-                  </div>
-                  <p className="text-[11.5px] text-ink-3">
-                    {setup ? `${agentName} · ${setup.detail}` : "Checking…"}
-                  </p>
-                  {setup && !ready && (
-                    <div className="flex flex-col items-center gap-2">
-                      {setup.hint && (
-                        <p className="max-w-[340px] text-[12px] leading-relaxed text-ink-3">
-                          {setup.hint}
-                        </p>
-                      )}
-                      {setup.installed ? (
-                        <button
-                          type="button"
-                          disabled={!!connecting}
-                          onClick={() => void connect(agent)}
-                          className="flex h-8 items-center gap-1.5 rounded-[8px] bg-accent px-3 text-[12.5px] font-medium text-on-accent transition-colors hover:bg-accent-2 disabled:opacity-60"
-                        >
-                          <Plugs size={14} />
-                          {connecting === agent
-                            ? "Waiting for sign-in…"
-                            : `Connect ${agentName}`}
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            useAgentSetup.getState().openGuide(agent)
-                          }
-                          className="flex h-8 items-center gap-1.5 rounded-[8px] bg-accent px-3 text-[12.5px] font-medium text-on-accent transition-colors hover:bg-accent-2"
-                        >
-                          <Plugs size={14} />
-                          Set up {agentName}
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-              <div className="flex flex-wrap items-center justify-center gap-1.5">
-                {SUGGESTIONS.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    disabled={running}
-                    onClick={() => void send(s)}
-                    className="rounded-full border border-line bg-panel px-3 py-1.5 text-[12px] text-ink-2 transition-colors duration-150 ease-out-expo hover:bg-hover hover:text-ink disabled:opacity-50"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </motion.div>
-          )}
-
-          {messages.map((m) => {
-            if (m.role === "tool") {
-              return <ToolRow key={m.id} msg={m} live={runningHere} />;
-            }
-            if (m.role === "user") {
-              return (
-                <div key={m.id} className="flex justify-end">
-                  <div className="flex max-w-[80%] flex-col items-end gap-2">
-                    {m.images && m.images.length > 0 && (
-                      <div className="flex flex-wrap justify-end gap-2">
-                        {m.images.map((src) => (
-                          <ChatImage key={src} src={src} />
-                        ))}
-                      </div>
-                    )}
-                    {m.text && (
-                      <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-[12px] border border-line-soft bg-panel-2 px-3.5 py-2 text-[14px] leading-[1.6] text-ink">
-                        {m.text}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            }
-            return m.text ? (
-              <div key={m.id} className="min-w-0">
-                <Markdown>{m.text}</Markdown>
-              </div>
-            ) : null;
-          })}
-
-          {showWorking && (
-            <p className="flex min-w-0 items-center gap-1.5 px-1 text-[12.5px] text-ink-3">
-              <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />
-              {status === "starting" ? (
-                `Starting ${agentName}…`
-              ) : thought ? (
-                <span className="truncate font-mono text-[11px] italic">
-                  {thought.slice(-160)}
-                </span>
-              ) : (
-                "Working…"
-              )}
-            </p>
-          )}
-          {chatError && desktop && (
-            <div className="flex items-start justify-between gap-3 rounded-[8px] border border-line bg-panel-2 px-3 py-2 text-[12.5px] text-danger">
-              <span className="min-w-0">{chatError}</span>
-              {/sign|credential|not found|install/i.test(chatError) && (
-                <button
-                  type="button"
-                  onClick={() => useAgentSetup.getState().openGuide(agent)}
-                  className="shrink-0 text-[12px] text-accent hover:underline"
-                >
-                  Fix setup
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* composer */}
-      <div className="shrink-0 border-t border-line-soft px-6 pb-5 pt-3 md:px-16">
-        <div className="mx-auto w-full max-w-[720px]">
-          {busyElsewhere && (
-            <button
-              type="button"
-              onClick={() => runningChatId && selectChat(runningChatId)}
-              className="mb-2 flex w-full items-center justify-center gap-1.5 text-[11.5px] text-ink-3 hover:text-ink-2"
-            >
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-              An agent is working in another chat — open it
-            </button>
-          )}
-          <input
-            ref={fileInput}
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              const files = imageFiles(e.currentTarget.files);
-              e.currentTarget.value = "";
-              if (files.length > 0) void addAttachments(files);
-            }}
-          />
-          <div
-            data-image-drop=""
-            onPaste={(e) => {
-              const files = imageFiles(e.clipboardData.files);
-              if (files.length === 0) return;
-              e.preventDefault();
-              void addAttachments(files);
-            }}
-            onDragOver={(e) => {
-              if (e.dataTransfer.types.includes("Files")) e.preventDefault();
-            }}
-            onDrop={(e) => {
-              const files = imageFiles(e.dataTransfer.files);
-              if (files.length === 0) return;
-              e.preventDefault();
-              void addAttachments(files);
-            }}
-            className="rounded-[12px] border border-line bg-panel px-3 py-2 shadow-[0_2px_12px_var(--color-shadow)] transition-colors duration-150 focus-within:border-accent-line"
-          >
-            {attachments.length > 0 && (
-              <div className="mb-2 flex flex-wrap gap-2">
-                {attachments.map((a) => (
-                  <div key={a.id} className="group relative">
-                    <img
-                      src={a.preview}
-                      alt=""
-                      className="h-14 w-14 rounded-[8px] border border-line-soft object-cover"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeAttachment(a.id)}
-                      aria-label="Remove image"
-                      className="absolute -right-1.5 -top-1.5 grid h-4 w-4 place-items-center rounded-full border border-line bg-elev text-ink-2 hover:text-ink"
-                    >
-                      <X size={9} weight="bold" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          <div className="flex items-end gap-2">
-            <button
-              type="button"
-              onClick={() => fileInput.current?.click()}
-              disabled={attachments.length >= MAX_ATTACHMENTS}
-              aria-label="Attach image"
-              title="Attach image (or paste / drop one)"
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] text-ink-3 transition-colors duration-150 hover:bg-hover hover:text-ink-2 disabled:opacity-35"
-            >
-              <Paperclip size={16} />
-            </button>
-            <textarea
-              ref={inputRef}
-              rows={1}
-              value={input}
-              onChange={(e) => setInput(e.currentTarget.value)}
-              onKeyDown={onComposerKey}
-              {...suggest.fieldProps}
-              placeholder={`Message ${agentName}… (@ a page, / a command or skill)`}
-              aria-label={`Message ${agentName}`}
-              spellCheck={false}
-              className="block max-h-[220px] min-w-0 flex-1 resize-none overflow-y-auto break-words bg-transparent py-1 text-[14px] leading-[1.6] text-ink outline-none placeholder:text-ink-3"
-            />
-            {suggest.menu}
-            <ModelSelect chatId={chat?.id} placement="up" size="md" />
-
-            {runningHere ? (
-              <button
-                type="button"
-                onClick={stop}
-                aria-label="Stop"
-                title="Stop"
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] bg-danger/15 text-danger transition-colors duration-150 hover:bg-danger/25"
-              >
-                <Square size={13} weight="fill" />
-              </button>
+    <div className="flex h-dvh min-w-0 flex-1 bg-canvas">
+      <div className="relative flex h-full min-w-0 flex-1 flex-col">
+        <header className="flex h-11 shrink-0 items-center gap-2 border-b border-line-soft px-4">
+          {chat ? (
+            editingTitle ? (
+              <input
+                ref={titleRef}
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.currentTarget.value)}
+                onBlur={commitTitle}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitTitle();
+                  if (e.key === "Escape") setEditingTitle(false);
+                }}
+                aria-label="Chat title"
+                className="min-w-0 max-w-[480px] flex-1 rounded-[4px] border border-line bg-panel-2 px-1.5 py-0.5 text-[12.5px] text-ink outline-none focus:border-accent-line"
+              />
             ) : (
               <button
                 type="button"
-                onClick={() => void submit()}
-                disabled={!canSend}
-                aria-label="Send"
-                title="Send (Enter)"
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] bg-accent text-on-accent transition-[background-color,transform] duration-150 ease-out-expo hover:bg-accent-2 active:scale-[0.97] disabled:opacity-35"
+                onClick={() => {
+                  setTitleDraft(chat.title);
+                  setEditingTitle(true);
+                }}
+                title="Rename chat"
+                className="group/title flex min-w-0 max-w-[480px] items-center gap-1.5 rounded-[4px] px-1 text-[12.5px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink"
               >
-                <PaperPlaneRight size={15} weight="fill" />
+                <span className="truncate">{chat.title}</span>
+                <PencilSimple
+                  size={12}
+                  className="shrink-0 text-ink-3 opacity-0 transition-opacity duration-150 group-hover/title:opacity-100"
+                />
+              </button>
+            )
+          ) : (
+            <span className="text-[12.5px] font-medium text-ink-2">
+              Agents
+            </span>
+          )}
+          <span
+            className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-line bg-panel-2 px-2 py-0.5 text-[11px] text-ink-3"
+            title={`${agentName} · ${meta.label}`}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
+            {agentName}
+          </span>
+
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            {chat && (
+              <>
+                {/* project assign */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setMenu((m) => (m === "project" ? null : "project"))
+                    }
+                    aria-label="Move to project"
+                    title={
+                      chat.projectId
+                        ? `Project: ${projects.find((p) => p.id === chat.projectId)?.name}`
+                        : "Move to project"
+                    }
+                    className={`${iconBtn} ${chat.projectId ? "text-accent" : ""}`}
+                  >
+                    <Folder size={15} />
+                  </button>
+                  <HeaderMenu
+                    open={menu === "project"}
+                    onClose={() => setMenu(null)}
+                  >
+                    <MenuItem
+                      active={chat.projectId === null}
+                      label="No project"
+                      onClick={() => {
+                        assignChat(chat.id, null);
+                        setMenu(null);
+                      }}
+                    />
+                    {projects.map((p) => (
+                      <MenuItem
+                        key={p.id}
+                        active={chat.projectId === p.id}
+                        label={p.name}
+                        onClick={() => {
+                          assignChat(chat.id, p.id);
+                          setMenu(null);
+                        }}
+                      />
+                    ))}
+                    {projects.length === 0 && (
+                      <p className="px-3 py-2 text-[11.5px] text-ink-3">
+                        No projects yet — create one in the sidebar.
+                      </p>
+                    )}
+                  </HeaderMenu>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => togglePinChat(chat.id)}
+                  aria-label={chat.pinned ? "Unpin chat" : "Pin chat"}
+                  title={chat.pinned ? "Unpin" : "Pin"}
+                  className={`${iconBtn} ${chat.pinned ? "text-accent" : ""}`}
+                >
+                  <PushPin
+                    size={15}
+                    weight={chat.pinned ? "fill" : "regular"}
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => deleteChat(chat.id)}
+                  aria-label="Delete chat"
+                  title="Delete chat"
+                  className={`${iconBtn} hover:text-danger`}
+                >
+                  <Trash size={15} />
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => togglePanel(!panelOpen)}
+              aria-pressed={panelOpen}
+              aria-label={panelOpen ? "Hide page" : "Show page next to the chat"}
+              title={panelOpen ? "Hide page" : "Show page next to the chat"}
+              className={`${iconBtn} ${panelOpen ? "text-accent" : ""}`}
+            >
+              <SidebarSimple size={15} className="-scale-x-100" />
+            </button>
+          </div>
+        </header>
+
+        <div ref={scrollRef} className="flex-1 overflow-y-auto">
+          <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-6 py-8 md:px-16">
+            {messages.length === 0 && (
+              <motion.div
+                initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                className="flex flex-col items-center gap-4 py-16 text-center"
+              >
+                <div className="grid h-11 w-11 place-items-center rounded-[12px] border border-line bg-panel">
+                  <Lightning size={20} className="text-accent" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-ink-2">
+                    Your workspace agent
+                  </p>
+                  <p className="mt-1.5 max-w-[400px] text-[12.5px] leading-relaxed text-ink-3">
+                    Runs locally and reads and writes the same pages you do.
+                    Ask it to draft, restructure, extract tasks or build
+                    interactive widgets — you watch the changes land.
+                  </p>
+                </div>
+                {!desktop ? (
+                  <p className="max-w-[380px] rounded-[10px] border border-dashed border-line px-4 py-3 text-[12.5px] leading-relaxed text-ink-3">
+                    {DESKTOP_ONLY_MESSAGE} Pages, tasks and templates work
+                    everywhere.
+                  </p>
+                ) : (
+                  <div className="flex w-full max-w-[360px] flex-col items-center gap-2">
+                    <div className="w-full">
+                      <AgentSwitch
+                        value={agent}
+                        onChange={(k) =>
+                          chat ? setChatAgent(chat.id, k) : setDefaultAgent(k)
+                        }
+                      />
+                    </div>
+                    <p className="text-[11.5px] text-ink-3">
+                      {setup ? `${agentName} · ${setup.detail}` : "Checking…"}
+                    </p>
+                    {setup && !ready && (
+                      <div className="flex flex-col items-center gap-2">
+                        {setup.hint && (
+                          <p className="max-w-[340px] text-[12px] leading-relaxed text-ink-3">
+                            {setup.hint}
+                          </p>
+                        )}
+                        {setup.installed ? (
+                          <button
+                            type="button"
+                            disabled={!!connecting}
+                            onClick={() => void connect(agent)}
+                            className="flex h-8 items-center gap-1.5 rounded-[8px] bg-accent px-3 text-[12.5px] font-medium text-on-accent transition-colors hover:bg-accent-2 disabled:opacity-60"
+                          >
+                            <Plugs size={14} />
+                            {connecting === agent
+                              ? "Waiting for sign-in…"
+                              : `Connect ${agentName}`}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              useAgentSetup.getState().openGuide(agent)
+                            }
+                            className="flex h-8 items-center gap-1.5 rounded-[8px] bg-accent px-3 text-[12.5px] font-medium text-on-accent transition-colors hover:bg-accent-2"
+                          >
+                            <Plugs size={14} />
+                            Set up {agentName}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className="flex flex-wrap items-center justify-center gap-1.5">
+                  {SUGGESTIONS.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      disabled={running}
+                      onClick={() => void send(s)}
+                      className="rounded-full border border-line bg-panel px-3 py-1.5 text-[12px] text-ink-2 transition-colors duration-150 ease-out-expo hover:bg-hover hover:text-ink disabled:opacity-50"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+
+            {messages.map((m) => {
+              if (m.role === "tool") {
+                return <ToolRow key={m.id} msg={m} live={runningHere} />;
+              }
+              if (m.role === "user") {
+                return (
+                  <div key={m.id} className="flex justify-end">
+                    <div className="flex max-w-[80%] flex-col items-end gap-2">
+                      {m.images && m.images.length > 0 && (
+                        <div className="flex flex-wrap justify-end gap-2">
+                          {m.images.map((src) => (
+                            <ChatImage key={src} src={src} />
+                          ))}
+                        </div>
+                      )}
+                      {m.text && (
+                        <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] rounded-[12px] border border-line-soft bg-panel-2 px-3.5 py-2 text-[14px] leading-[1.6] text-ink">
+                          {m.text}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              }
+              return m.text ? (
+                <div key={m.id} className="min-w-0">
+                  <Markdown>{m.text}</Markdown>
+                </div>
+              ) : null;
+            })}
+
+            {showWorking && (
+              <p className="flex min-w-0 items-center gap-1.5 px-1 text-[12.5px] text-ink-3">
+                <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />
+                {status === "starting" ? (
+                  `Starting ${agentName}…`
+                ) : thought ? (
+                  <span className="truncate font-mono text-[11px] italic">
+                    {thought.slice(-160)}
+                  </span>
+                ) : (
+                  "Working…"
+                )}
+              </p>
+            )}
+            {chatError && desktop && (
+              <div className="flex items-start justify-between gap-3 rounded-[8px] border border-line bg-panel-2 px-3 py-2 text-[12.5px] text-danger">
+                <span className="min-w-0">{chatError}</span>
+                {/sign|credential|not found|install/i.test(chatError) && (
+                  <button
+                    type="button"
+                    onClick={() => useAgentSetup.getState().openGuide(agent)}
+                    className="shrink-0 text-[12px] text-accent hover:underline"
+                  >
+                    Fix setup
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* composer */}
+        <div className="shrink-0 border-t border-line-soft px-6 pb-5 pt-3 md:px-16">
+          <div className="mx-auto w-full max-w-[720px]">
+            {busyElsewhere && (
+              <button
+                type="button"
+                onClick={() => runningChatId && selectChat(runningChatId)}
+                className="mb-2 flex w-full items-center justify-center gap-1.5 text-[11.5px] text-ink-3 hover:text-ink-2"
+              >
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+                An agent is working in another chat — open it
               </button>
             )}
-          </div>
-          </div>
-          <p className="mt-2 flex items-center justify-center gap-3 text-center font-mono text-[10.5px] text-ink-3">
-            <span>
-              {AGENTS[agent].name.toLowerCase()} · acp · {approval === "auto"
-                ? "edits auto-approved"
-                : "you review edits"}
-              , undo with ctrl z on the page
-            </span>
-            {usage && usage.size > 0 && runningChatId === null && (
+            <input
+              ref={fileInput}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                const files = imageFiles(e.currentTarget.files);
+                e.currentTarget.value = "";
+                if (files.length > 0) void addAttachments(files);
+              }}
+            />
+            <div
+              data-image-drop=""
+              onPaste={(e) => {
+                const files = imageFiles(e.clipboardData.files);
+                if (files.length === 0) return;
+                e.preventDefault();
+                void addAttachments(files);
+              }}
+              onDragOver={(e) => {
+                if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+              }}
+              onDrop={(e) => {
+                const files = imageFiles(e.dataTransfer.files);
+                if (files.length === 0) return;
+                e.preventDefault();
+                void addAttachments(files);
+              }}
+              className="rounded-[12px] border border-line bg-panel px-3 py-2 shadow-[0_2px_12px_var(--color-shadow)] transition-colors duration-150 focus-within:border-accent-line"
+            >
+              {attachments.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {attachments.map((a) => (
+                    <div key={a.id} className="group relative">
+                      <img
+                        src={a.preview}
+                        alt=""
+                        className="h-14 w-14 rounded-[8px] border border-line-soft object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeAttachment(a.id)}
+                        aria-label="Remove image"
+                        className="absolute -right-1.5 -top-1.5 grid h-4 w-4 place-items-center rounded-full border border-line bg-elev text-ink-2 hover:text-ink"
+                      >
+                        <X size={9} weight="bold" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            <div className="flex items-end gap-2">
+              <button
+                type="button"
+                onClick={() => fileInput.current?.click()}
+                disabled={attachments.length >= MAX_ATTACHMENTS}
+                aria-label="Attach image"
+                title="Attach image (or paste / drop one)"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] text-ink-3 transition-colors duration-150 hover:bg-hover hover:text-ink-2 disabled:opacity-35"
+              >
+                <Paperclip size={16} />
+              </button>
+              <textarea
+                ref={inputRef}
+                rows={1}
+                value={input}
+                onChange={(e) => setInput(e.currentTarget.value)}
+                onKeyDown={onComposerKey}
+                {...suggest.fieldProps}
+                placeholder={`Message ${agentName}…`}
+                aria-label={`Message ${agentName}`}
+                spellCheck={false}
+                className="block max-h-[220px] min-w-0 flex-1 resize-none overflow-y-auto break-words bg-transparent py-1 text-[14px] leading-[1.6] text-ink outline-none placeholder:text-ink-3"
+              />
+              {suggest.menu}
+              <ModelSelect chatId={chat?.id} placement="up" size="md" />
+
+              {runningHere ? (
+                <button
+                  type="button"
+                  onClick={stop}
+                  aria-label="Stop"
+                  title="Stop"
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] bg-danger/15 text-danger transition-colors duration-150 hover:bg-danger/25"
+                >
+                  <Square size={13} weight="fill" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void submit()}
+                  disabled={!canSend}
+                  aria-label="Send"
+                  title="Send (Enter)"
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] bg-accent text-on-accent transition-[background-color,transform] duration-150 ease-out-expo hover:bg-accent-2 active:scale-[0.97] disabled:opacity-35"
+                >
+                  <PaperPlaneRight size={15} weight="fill" />
+                </button>
+              )}
+            </div>
+            </div>
+            <p className="mt-2 flex items-center justify-center gap-3 text-center font-mono text-[10.5px] text-ink-3">
               <span>
-                ctx {formatK(usage.used)}/{formatK(usage.size)}
+                {AGENTS[agent].name.toLowerCase()} · acp · {approval === "auto"
+                  ? "edits auto-approved"
+                  : "you review edits"}
+                , undo with ctrl z on the page
               </span>
-            )}
-          </p>
+              {usage && usage.size > 0 && runningChatId === null && (
+                <span>
+                  ctx {formatK(usage.used)}/{formatK(usage.size)}
+                </span>
+              )}
+            </p>
+          </div>
         </div>
       </div>
+      {panelOpen && (
+        <PageSidePanel
+          docId={panelDoc}
+          onDocChange={showPanelDoc}
+          onClose={() => togglePanel(false)}
+        />
+      )}
     </div>
   );
 }
