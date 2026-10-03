@@ -369,9 +369,12 @@ kbd {
   margin: 1.6em 0;
 }
 
+.prose-doc .table-scroll {
+  margin: 0.9em 0;
+  overflow-x: auto;
+}
 .prose-doc table {
   width: 100%;
-  margin: 0.9em 0;
   border-collapse: collapse;
   font-size: 0.92em;
 }
@@ -380,6 +383,14 @@ kbd {
   text-align: left;
   padding: 8px 12px;
   border-bottom: 1px solid var(--color-line-soft);
+  /* break between words only — a squeezed column must not split "Third" */
+  word-break: normal;
+  overflow-wrap: normal;
+}
+/* …but a long URL may break, so it doesn't squeeze the other columns */
+.prose-doc td a,
+.prose-doc td code {
+  overflow-wrap: anywhere;
 }
 .prose-doc th {
   color: var(--color-ink-2);

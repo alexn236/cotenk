@@ -26,6 +26,7 @@ import {
   storeApiKeyOverride,
   storeWorkspaceDir,
 } from "@/lib/workspace";
+import { ThemePicker } from "@/components/ui/theme-picker";
 import { ExtensionsSection } from "./extensions-section";
 import { DataSection } from "./data-section";
 import {
@@ -39,89 +40,11 @@ import {
 
 /* ---------- appearance ---------- */
 
-function ThemeCard({
-  value,
-  label,
-  sub,
-  canvas,
-  panel,
-  accent,
-}: {
-  value: "dark" | "light";
-  label: string;
-  sub: string;
-  canvas: string;
-  panel: string;
-  accent: string;
-}) {
-  const active = useWorkspace((s) => s.theme === value);
-  const setTheme = useWorkspace((s) => s.setTheme);
-
-  return (
-    <button
-      type="button"
-      onClick={() => setTheme(value)}
-      aria-pressed={active}
-      className={`relative cursor-pointer rounded-[10px] border p-3 text-left transition-colors duration-150 ${
-        active
-          ? "border-accent bg-accent-dim"
-          : "border-line bg-panel hover:bg-panel-2"
-      }`}
-    >
-      {active && (
-        <CheckCircle
-          size={15}
-          className="absolute right-3 top-3 text-accent"
-        />
-      )}
-      {/* mini theme swatch: real palette hexes, intentionally not tokens */}
-      <div
-        className="h-16 overflow-hidden rounded-[8px] border border-line"
-        style={{ backgroundColor: canvas }}
-      >
-        <div className="flex h-full flex-col gap-1.5 p-2.5">
-          <div
-            className="h-2 w-1/2 rounded-full"
-            style={{ backgroundColor: panel }}
-          />
-          <div
-            className="h-2 w-2/3 rounded-full"
-            style={{ backgroundColor: panel }}
-          />
-          <div
-            className="mt-auto h-1.5 w-1.5 rounded-full"
-            style={{ backgroundColor: accent }}
-          />
-        </div>
-      </div>
-      <div className="mt-2.5 text-[12.5px] text-ink-2">{label}</div>
-      <div className="text-[11px] text-ink-3">{sub}</div>
-    </button>
-  );
-}
-
 function AppearanceSection() {
   return (
     <section>
       <SectionTitle title="Appearance" />
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <ThemeCard
-          value="dark"
-          label="Dark"
-          sub="Warm charcoal"
-          canvas="#131211"
-          panel="#1c1a18"
-          accent="#e2a05c"
-        />
-        <ThemeCard
-          value="light"
-          label="Light"
-          sub="Warm bone"
-          canvas="#f4f2ea"
-          panel="#ffffff"
-          accent="#a8641c"
-        />
-      </div>
+      <ThemePicker />
       <p className="mt-3 text-[11.5px] text-ink-3">Synced to this device</p>
       <NotificationsCard />
     </section>
@@ -231,8 +154,8 @@ function AccountSection() {
           label="Sign out"
           desc={
             isDesktop()
-              ? "Stops syncing and switches back to this device's local workspace. The account's folder stays on disk."
-              : "Switches back to this device's local workspace. Your pages stay in your account."
+              ? "Stops syncing and returns to the sign-in screen. The account's folder stays on disk."
+              : "Returns to the sign-in screen. Your pages stay in your account."
           }
         >
           <button
@@ -527,7 +450,7 @@ function AgentsSection() {
     <section>
       <SectionTitle
         title="Agents"
-        sub="Agents run locally on your machine via ACP and start in your workspace folder. CoTenk refuses file changes outside it, but an agent can still read other files and a command can reach further — it is not a sandbox. Each chat talks to one agent; the default is used for Ask agent, tasks and Build with AI."
+        sub="Agents run locally on your machine via ACP and start in your workspace folder. Anything that reaches outside it — reading, changing files, a command with an outside path — waits for your approval, also with auto-approve. That covers what the agent asks about; it is not a sandbox. Each chat talks to one agent; the default is used for Ask agent, tasks and Build with AI."
       />
       <div className="flex flex-col gap-3">
         {AGENT_KINDS.map((k) => (
@@ -604,7 +527,7 @@ function ApprovalRow() {
             role="radio"
             aria-checked={mode === m}
             onClick={() => setMode(m)}
-            className={`h-6 rounded-[5px] px-2.5 text-[11.5px] transition-colors duration-150 ${
+            className={`h-6 whitespace-nowrap rounded-[5px] px-2.5 text-[11.5px] transition-colors duration-150 ${
               mode === m ? "bg-elev text-ink" : "text-ink-3 hover:text-ink-2"
             }`}
           >

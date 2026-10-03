@@ -3,9 +3,10 @@ import type { RefObject } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowUp } from "@phosphor-icons/react";
 import { extractHeadings } from "@/lib/headings";
-import { useActiveDoc, useWorkspace } from "@/lib/store";
+import { useActiveDoc } from "@/lib/store";
 
 export type ContentsPanelProps = {
+  open: boolean;
   /** Scroll container that hosts the rendered document (observer root). */
   scrollRoot: RefObject<HTMLElement | null>;
   /** Raw markdown of the current document. */
@@ -22,8 +23,11 @@ const dotOffsetFor = (level: number) =>
  * Floating table-of-contents card for the document editor. Lists h1-h3
  * headings, scroll-spies the document and jumps to a heading on click.
  */
-export function ContentsPanel({ scrollRoot, docContent }: ContentsPanelProps) {
-  const contentsOpen = useWorkspace((s) => s.contentsOpen);
+export function ContentsPanel({
+  open,
+  scrollRoot,
+  docContent,
+}: ContentsPanelProps) {
   const doc = useActiveDoc();
   const reduceMotion = useReducedMotion();
 
@@ -124,7 +128,7 @@ export function ContentsPanel({ scrollRoot, docContent }: ContentsPanelProps) {
 
   return (
     <AnimatePresence>
-      {contentsOpen && (
+      {open && (
         <motion.aside
           initial={reduceMotion ? false : { opacity: 0, x: 24 }}
           animate={{ opacity: 1, x: 0 }}

@@ -70,7 +70,7 @@ export function MarketView() {
         <span className="text-[12.5px] text-ink-3">/ {title}</span>
       </header>
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[920px] px-6 py-10 md:px-12">
+        <div className="@container mx-auto w-full max-w-[920px] px-6 py-10 md:px-12">
           {tab === "discover" && <Discover />}
           {tab === "mine" && <MyListings />}
           {tab === "build" && <BuildWithAi />}
@@ -102,7 +102,7 @@ function Discover() {
 
   return (
     <>
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex flex-col gap-4 @2xl:flex-row @2xl:items-end @2xl:justify-between">
         <div>
           <h1 className="text-[24px] font-semibold tracking-[-0.01em] text-ink">
             Pages that work out of the box
@@ -112,7 +112,7 @@ function Discover() {
             community and their agents. Install a copy, then make it yours.
           </p>
         </div>
-        <div className="flex h-8 w-full items-center gap-2 rounded-[8px] border border-line-soft bg-panel px-2.5 sm:w-[240px]">
+        <div className="flex h-8 w-full shrink-0 items-center gap-2 rounded-[8px] border border-line-soft bg-panel px-2.5 @2xl:w-[240px]">
           <MagnifyingGlass size={13} className="shrink-0 text-ink-3" />
           <input
             value={query}
@@ -181,7 +181,7 @@ function Shelf({
         </span>
       </div>
       {cards.length === 0 ? (
-        <div className="flex flex-col items-start gap-3 rounded-[10px] border border-dashed border-line px-4 py-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col items-start gap-3 rounded-[10px] border border-dashed border-line px-4 py-5 @xl:flex-row @xl:items-center @xl:justify-between">
           <p className="text-[12.5px] text-ink-3">{empty}</p>
           {action && (
             <button
@@ -194,7 +194,7 @@ function Shelf({
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 @lg:grid-cols-2 @3xl:grid-cols-3">
           {cards.map((c, i) => (
             <Card key={c.key} card={c} index={i} onOpen={() => onOpen(c)} />
           ))}
@@ -219,12 +219,12 @@ function Card({
       initial={reduceMotion ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.32, delay: Math.min(index * 0.035, 0.3), ease: EASE }}
-      className="group flex flex-col rounded-[10px] border border-line-soft bg-panel p-4 transition-[background-color,border-color] duration-150 hover:border-line hover:bg-panel-2"
+      className="group flex min-w-0 flex-col rounded-[10px] border border-line-soft bg-panel p-4 transition-[background-color,border-color] duration-150 hover:border-line hover:bg-panel-2"
     >
       <button
         type="button"
         onClick={onOpen}
-        className="flex flex-1 flex-col items-start text-left"
+        className="flex min-w-0 flex-1 flex-col items-start text-left [overflow-wrap:anywhere]"
       >
         <div className="flex items-center gap-2">
           <span className="rounded-full border border-line px-2 py-0.5 text-[10.5px] text-ink-3">
@@ -245,16 +245,18 @@ function Card({
         </p>
       </button>
       <div className="mt-4 flex items-center gap-2 text-[11.5px] text-ink-3">
-        <span className="flex min-w-0 items-center gap-1 truncate">
+        <span className="flex min-w-0 items-center gap-1">
           {card.official && (
             <CheckCircle size={12} weight="fill" className="shrink-0 text-accent" />
           )}
-          {card.author}
+          <span className="truncate">{card.author}</span>
         </span>
         {card.installs !== null && (
-          <span className="font-mono">· {card.installs} installs</span>
+          <span className="shrink-0 whitespace-nowrap font-mono">
+            · {card.installs} installs
+          </span>
         )}
-        <span className="ml-auto font-mono">
+        <span className="ml-auto shrink-0 whitespace-nowrap font-mono">
           {card.priceCents > 0 ? `€${(card.priceCents / 100).toFixed(2)}` : "Free"}
         </span>
         <button
@@ -262,7 +264,7 @@ function Card({
           onClick={() => install(card)}
           aria-label={`Use ${card.title}`}
           title="Use template"
-          className="grid h-7 w-7 place-items-center rounded-[6px] border border-line bg-panel-2 text-ink-2 transition-colors duration-150 hover:bg-accent hover:text-on-accent"
+          className="grid h-7 w-7 shrink-0 place-items-center rounded-[6px] border border-line bg-panel-2 text-ink-2 transition-colors duration-150 hover:bg-accent hover:text-on-accent"
         >
           <DownloadSimple size={13} />
         </button>
@@ -394,7 +396,7 @@ function MyListings() {
         </p>
       )}
 
-      <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-8 grid grid-cols-1 gap-3 @lg:grid-cols-2 @3xl:grid-cols-3">
         {cards.map((c, i) => (
           <Card key={c.key} card={c} index={i} onOpen={() => setPreview(c)} />
         ))}
@@ -508,8 +510,8 @@ function BuildWithAi() {
           aria-label="Describe the page"
           className="block w-full resize-none bg-transparent px-1 text-[14px] leading-[1.6] text-ink outline-none placeholder:text-ink-3"
         />
-        <div className="mt-2 flex items-center gap-3">
-          <label className="flex cursor-pointer select-none items-center gap-2 text-[12px] text-ink-2">
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <label className="flex cursor-pointer select-none items-center gap-2 whitespace-nowrap text-[12px] text-ink-2">
             <input
               type="checkbox"
               checked={interactive}
@@ -518,19 +520,21 @@ function BuildWithAi() {
             />
             Include interactive widgets
           </label>
-          <span className="ml-auto hidden font-mono text-[10.5px] text-ink-3 sm:inline">
+          <span className="ml-auto hidden whitespace-nowrap font-mono text-[10.5px] text-ink-3 @xl:inline">
             Ctrl ↵
           </span>
-          <ModelSelect />
-          <button
-            type="button"
-            onClick={submit}
-            disabled={!desc.trim() || running}
-            className={btn.primary}
-          >
-            <Plus size={13} />
-            {running ? "Agent busy…" : "Build page"}
-          </button>
+          <span className="ml-auto flex items-center gap-3 @xl:ml-0">
+            <ModelSelect />
+            <button
+              type="button"
+              onClick={submit}
+              disabled={!desc.trim() || running}
+              className={btn.primary}
+            >
+              <Plus size={13} />
+              {running ? "Agent busy…" : "Build page"}
+            </button>
+          </span>
         </div>
       </div>
 

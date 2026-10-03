@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { ArrowLeft, ArrowRight, Check } from "@phosphor-icons/react";
-import { Modal } from "@/components/ui/modal";
 import { btn } from "@/components/ui/styles";
 import {
   isReady,
@@ -10,13 +9,6 @@ import {
 } from "@/lib/agent-setup";
 import { useAgent } from "@/lib/agent-store";
 import { AGENT_KINDS, AGENTS, type AgentKind } from "@/lib/agents";
-import {
-  agentOnboardingDone,
-  finishAgentOnboarding,
-  onboardingComplete,
-  onboardingDismissed,
-} from "@/lib/onboarding";
-import { isDesktop } from "@/lib/workspace";
 import { AgentIntro, AgentSteps } from "./agent-setup-guide";
 
 /** What each agent asks of people, shown on the pick step. */
@@ -29,31 +21,12 @@ const NEEDS: Record<AgentKind, string> = {
 type Phase = { step: "pick" } | { step: "setup"; i: number } | { step: "done" };
 
 /**
- * First-run dialog on the desktop app: choose which agents to use — the
- * built-in CoTenk Agent, Claude Code, Devin CLI — then set each one up
- * in turn. Shown once per device; the Home checklist and Settings →
- * Agents cover everything later.
+ * Agents step of the welcome flow (desktop only): choose which agents
+ * to use — the built-in CoTenk Agent, Claude Code, Devin CLI — then set
+ * each one up in turn. The Home checklist and Settings → Agents cover
+ * everything later.
  */
-export function AgentOnboarding() {
-  const [open, setOpen] = useState(
-    () =>
-      isDesktop() &&
-      !agentOnboardingDone() &&
-      !onboardingComplete() &&
-      !onboardingDismissed(),
-  );
-  const finish = () => {
-    finishAgentOnboarding();
-    setOpen(false);
-  };
-  return (
-    <Modal open={open} onClose={finish} title="Welcome to CoTenk" width={560}>
-      {open && <Body onFinish={finish} />}
-    </Modal>
-  );
-}
-
-function Body({ onFinish }: { onFinish: () => void }) {
+export function AgentOnboardingSteps({ onFinish }: { onFinish: () => void }) {
   const setup = useAgentSetup((s) => s.setup);
   const setDefaultAgent = useAgent((s) => s.setDefaultAgent);
   const defaultAgent = useAgent((s) => s.defaultAgent);

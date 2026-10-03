@@ -18,7 +18,9 @@ import {
 import { mergeOffer, type MergeOffer } from "@/lib/local-merge";
 import { isDesktop, setWorkspaceScope } from "@/lib/workspace";
 import { toast } from "@/lib/toast";
+import { finishWelcome, welcomeFinished } from "@/lib/onboarding";
 import { SignInDialog } from "./auth-view";
+import { WelcomeFlow } from "./welcome-flow";
 import { MergeDialog } from "./merge-dialog";
 
 /** Empty agent state — chats belong to one account (or the device). */
@@ -49,13 +51,14 @@ function showLocalWorkspace() {
 
 /**
  * Session gate: shows a splash while the session is restored, then the
- * app shell — with or without an account.
+ * welcome flow until someone is signed in — CoTenk needs an account.
+ * A first run walks through the whole flow (theme, account, agents)
+ * before the app opens; later sign-ins go straight in.
  *
- * Signed out, the device's own workspace is shown (cached in the
- * browser, mirrored to the local folder on desktop). Signed in, the
- * account's workspace replaces it: loaded from Supabase, mirrored to the
- * account's own folder. The two never mix — local pages only move into
- * an account when the user says so (merge dialog after the first pull).
+ * Signed in, the account's workspace is loaded from Supabase and
+ * mirrored to the account's own folder. Pages from the device's older
+ * local workspace only move into an account when the user says so
+ * (merge dialog after the first pull).
  */
 export function AuthGate({ children }: { children: ReactNode }) {
   const status = useAuth((s) => s.status);
@@ -70,6 +73,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const loadAccount = useAuth((s) => s.loadAccount);
   const wasSignedIn = useRef(false);
   const [offer, setOffer] = useState<MergeOffer | null>(null);
+  // First run on this device: the flow stays up after signing in until
+  // its last step (agents / all set) is through.
+  const [fresh, setFresh] = useState(() => !welcomeFinished());
 
   useEffect(() => {
     init();
@@ -160,6 +166,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }, [accountStatus, accountError, loadAccount]);
 
   if (status === "loading") return <Splash />;
+  if (status === "signedOut" || fresh) {
+    return (
+      <WelcomeFlow
+        fresh={fresh}
+        onDone={() => {
+          finishWelcome();
+          setFresh(false);
+        }}
+      />
+    );
+  }
   return (
     <>
       {children}

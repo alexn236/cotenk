@@ -21,6 +21,13 @@ export type AccountStatus = "idle" | "loading" | "ready" | "error";
  */
 export type DialogMode = "signin" | "signup" | "reset" | "recovery";
 
+export const AUTH_TITLES: Record<DialogMode, string> = {
+  signin: "Sign in",
+  signup: "Create account",
+  reset: "Reset password",
+  recovery: "Set a new password",
+};
+
 type AuthState = {
   status: AuthStatus;
   user: AuthUser | null;

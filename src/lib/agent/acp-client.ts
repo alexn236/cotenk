@@ -47,6 +47,24 @@ export type AgentEvent =
 
 export type { ModelOption };
 
+/** A slash command the agent itself offers (ACP available_commands_update). */
+export type AgentCommand = {
+  name: string;
+  description: string;
+  /** Hint for the text after the command, e.g. "<description>". */
+  hint: string | null;
+};
+
+const commandListeners = new Set<(kind: AgentKind, cmds: AgentCommand[]) => void>();
+
+/** Called whenever an agent reports (new) slash commands. */
+export function onAgentCommands(
+  fn: (kind: AgentKind, cmds: AgentCommand[]) => void,
+): () => void {
+  commandListeners.add(fn);
+  return () => commandListeners.delete(fn);
+}
+
 type Pending = {
   resolve: (v: unknown) => void;
   reject: (e: Error) => void;
@@ -350,6 +368,11 @@ class AcpClient {
           size?: number;
           entries?: { content?: string }[];
           configOptions?: ConfigOption[];
+          availableCommands?: {
+            name?: string;
+            description?: string;
+            input?: { hint?: string } | null;
+          }[];
         }
       | undefined;
     if (!u?.sessionUpdate) return;
@@ -391,6 +414,17 @@ class AcpClient {
       case "config_option_update":
         this.captureModels(u.configOptions);
         break;
+      case "available_commands_update": {
+        const cmds = (u.availableCommands ?? [])
+          .filter((c) => typeof c.name === "string" && c.name.trim())
+          .map((c) => ({
+            name: c.name!.trim().replace(/^\//, ""),
+            description: c.description?.trim() ?? "",
+            hint: c.input?.hint?.trim() || null,
+          }));
+        for (const l of commandListeners) l(this.kind, cmds);
+        break;
+      }
     }
   }
 

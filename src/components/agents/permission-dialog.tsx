@@ -51,7 +51,11 @@ function Review({ req, pending }: { req: PermissionRequest; pending: number }) {
   const where = firstTitle ?? fileName;
 
   const headline =
-    req.diffs.length > 0
+    req.outside && req.diffs.length === 0 && req.kind !== "execute"
+      ? ["read", "search", "fetch"].includes(req.kind ?? "")
+        ? `${agent} wants to read outside your workspace folder`
+        : `${agent} wants to work outside your workspace folder`
+      : req.diffs.length > 0
       ? req.diffs.length === 1 && req.diffs[0].oldText === null
         ? `${agent} wants to create “${where}”`
         : `${agent} wants to change ${blocks} ${blocks === 1 ? "block" : "blocks"}${
@@ -63,7 +67,9 @@ function Review({ req, pending }: { req: PermissionRequest; pending: number }) {
           ? `${agent} wants to delete a file`
           : `${agent} asks for permission`;
 
-  const allowChat = req.options.some((o) => o.kind === "allow_always");
+  // Outside the workspace folder every step is asked on its own.
+  const allowChat =
+    !req.outside && req.options.some((o) => o.kind === "allow_always");
 
   return (
     <Modal

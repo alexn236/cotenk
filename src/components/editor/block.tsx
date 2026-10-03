@@ -13,17 +13,27 @@ import type {
   MouseEvent,
 } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Check, PencilSimple, Plus, Trash } from "@phosphor-icons/react";
+import {
+  ArrowsOut,
+  Check,
+  FileHtml,
+  PencilSimple,
+  Plus,
+  Trash,
+} from "@phosphor-icons/react";
 import { looksLikeEmbed, serializeBlocks } from "@/lib/blocks";
 import type { BlockData, BlockType } from "@/lib/blocks";
 import { useWorkspace } from "@/lib/store";
 import { decorateTaskText } from "@/lib/tasks";
 import {
   embedApiScript,
+  embedThemeCss,
   MAX_EMBED_STATE,
   splitEmbedState,
 } from "@/lib/embed-state";
 import { Markdown } from "./markdown";
+import { Modal } from "@/components/ui/modal";
+import { embedAsHtmlPage } from "@/lib/html-page";
 import { FileBody, ImageBody } from "./attachment-blocks";
 import { useSuggest } from "@/components/ui/use-suggest";
 import { autosizeTextarea, useIsomorphicLayoutEffect } from "./utils";
@@ -144,32 +154,6 @@ function caretOnVisualEdge(
 }
 
 const EMBED_HEIGHT_SCRIPT = `<script>(function(){var s=function(){var b=document.body;var h=Math.max(b?b.scrollHeight:0,document.documentElement.scrollHeight);parent.postMessage({cotenkEmbedHeight:h},"*")};window.addEventListener("load",s);try{new ResizeObserver(s).observe(document.body)}catch(e){}s()})();</script>`;
-
-/** Theme tokens exposed to embeds as --ck-* CSS variables. */
-const EMBED_TOKENS = [
-  "canvas",
-  "panel",
-  "panel-2",
-  "elev",
-  "line",
-  "ink",
-  "ink-2",
-  "ink-3",
-  "accent",
-  "accent-2",
-  "accent-dim",
-  "on-accent",
-  "danger",
-] as const;
-
-function embedThemeCss(scheme: string): string {
-  if (typeof document === "undefined") return "";
-  const cs = getComputedStyle(document.documentElement);
-  const vars = EMBED_TOKENS.map(
-    (t) => `--ck-${t}:${cs.getPropertyValue(`--${t}`).trim()}`,
-  ).join(";");
-  return `:root{${vars};color-scheme:${scheme}}`;
-}
 
 /**
  * Wraps embed HTML in a full document. The current theme is injected as
@@ -658,12 +642,15 @@ export function Block({
 export function EmbedFrame({
   html,
   title,
-  maxHeight = 600,
+  maxHeight = 1200,
+  framed = true,
   onSave,
 }: {
   html: string;
   title: string;
   maxHeight?: number;
+  /** Border + surface; off for embeds sitting in the page. */
+  framed?: boolean;
   /** Receives cotenk.save() payloads (JSON). Omit for read-only frames. */
   onSave?: (json: string) => void;
 }) {
@@ -719,7 +706,9 @@ export function EmbedFrame({
       srcDoc={srcDoc}
       title={title}
       style={{ height }}
-      className="block w-full rounded-[8px] border border-line bg-elev"
+      className={`block w-full rounded-[8px] ${
+        framed ? "border border-line bg-elev" : "bg-transparent"
+      }`}
     />
   );
 }
@@ -744,9 +733,11 @@ function EmbedPreview({
   const deferred = useDeferredValue(html);
   const reduceMotion = useReducedMotion();
   const floating = useMediaQuery("(min-width: 1280px)");
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(
-    null,
-  );
+  const [pos, setPos] = useState<{
+    left: number;
+    top: number;
+    width: number;
+  } | null>(null);
 
   useIsomorphicLayoutEffect(() => {
     if (!floating) {
@@ -757,10 +748,12 @@ function EmbedPreview({
       const el = getAnchor();
       if (!el) return;
       const r = el.getBoundingClientRect();
-      const w = 340;
+      // As wide as the space beside the text allows (340–560px).
+      const w = Math.max(340, Math.min(560, window.innerWidth - r.right - 36));
       setPos({
         left: Math.min(r.right + 20, window.innerWidth - w - 16),
         top: Math.max(64, Math.min(r.top - 4, window.innerHeight - 220)),
+        width: w,
       });
     };
     update();
@@ -815,17 +808,23 @@ function EmbedPreview({
       style={{
         left: pos?.left ?? 0,
         top: pos?.top ?? 0,
+        width: pos?.width ?? 340,
         visibility: pos ? "visible" : "hidden",
       }}
-      className="fixed z-40 w-[340px]"
+      className="fixed z-40"
     >
       {card}
     </motion.div>
   );
 }
 
+const EMBED_TOOL =
+  "grid h-7 w-7 place-items-center rounded-[6px] text-ink-3 transition-colors duration-150 hover:bg-hover hover:text-ink";
+
 /**
- * Idle embed block: the raw HTML runs inside a sandboxed iframe.
+ * Idle embed block: the raw HTML runs inside a sandboxed iframe that sits
+ * in the page without chrome. Hovering shows edit, full-screen and
+ * "open as HTML page".
  */
 function EmbedView({
   html,
@@ -836,24 +835,65 @@ function EmbedView({
   onStartEdit: () => void;
   onSave: (json: string) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const createDocWith = useWorkspace((s) => s.createDocWith);
   return (
-    <div>
-      <div
-        role="button"
-        tabIndex={-1}
-        aria-label="Edit HTML"
-        onClick={onStartEdit}
-        className="group/embed flex cursor-pointer items-center justify-end gap-1.5 pb-1 pt-0.5"
-      >
-        <PencilSimple
-          size={11}
-          className="text-ink-3 opacity-0 transition-opacity duration-150 ease-out-expo group-hover/embed:opacity-100"
-        />
-        <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">
-          HTML · sandboxed
-        </span>
+    <div className="group/embed relative rounded-[10px] ring-1 ring-transparent transition-[box-shadow] duration-150 hover:ring-line">
+      <EmbedFrame
+        html={html}
+        title="Embedded HTML"
+        framed={false}
+        onSave={onSave}
+      />
+      <div className="pointer-events-none absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded-[8px] border border-line bg-panel/95 p-0.5 opacity-0 shadow-[0_6px_20px_var(--color-shadow)] backdrop-blur transition-opacity duration-150 group-focus-within/embed:pointer-events-auto group-focus-within/embed:opacity-100 group-hover/embed:pointer-events-auto group-hover/embed:opacity-100">
+        <button
+          type="button"
+          onClick={onStartEdit}
+          title="Edit HTML"
+          aria-label="Edit HTML"
+          className={EMBED_TOOL}
+        >
+          <PencilSimple size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          title="Full screen"
+          aria-label="Show full screen"
+          className={EMBED_TOOL}
+        >
+          <ArrowsOut size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            createDocWith({ title: "Embed", content: embedAsHtmlPage(html) })
+          }
+          title="Open as HTML page"
+          aria-label="Open as HTML page"
+          className={EMBED_TOOL}
+        >
+          <FileHtml size={14} />
+        </button>
       </div>
-      <EmbedFrame html={html} title="Embedded HTML" onSave={onSave} />
+      <Modal
+        open={expanded}
+        onClose={() => setExpanded(false)}
+        title="Embed"
+        width={1200}
+      >
+        {expanded && (
+          <div className="p-4">
+            <EmbedFrame
+              html={html}
+              title="Embedded HTML, full screen"
+              maxHeight={Math.max(400, window.innerHeight - 180)}
+              framed={false}
+              onSave={onSave}
+            />
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

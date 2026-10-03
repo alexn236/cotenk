@@ -188,7 +188,7 @@ function Card({
             {task.done && <Check size={9} weight="bold" />}
           </button>
           <span
-            className={`min-w-0 flex-1 text-[12.5px] leading-[1.45] ${
+            className={`min-w-0 flex-1 text-[12.5px] leading-[1.45] [overflow-wrap:anywhere] ${
               task.done ? "text-ink-3 line-through decoration-ink-3" : "text-ink"
             }`}
           >

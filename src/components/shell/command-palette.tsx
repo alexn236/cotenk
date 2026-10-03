@@ -4,6 +4,7 @@ import {
   CheckSquare,
   DownloadSimple,
   FileText,
+  FileHtml,
   FolderPlus,
   GearSix,
   Hand,
@@ -18,6 +19,7 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 import { openWelcomePage, useWorkspace } from "@/lib/store";
+import { HTML_PAGE_TEMPLATE } from "@/lib/html-page";
 import { requestSignIn, useAuth } from "@/lib/auth-store";
 import type { Doc, Folder } from "@/lib/types";
 import { askAgent } from "@/lib/agent-actions";
@@ -109,6 +111,16 @@ function buildItems(
       run: go(() => {
         ws.createDoc();
         ws.setRailSection("docs");
+      }),
+    },
+    {
+      id: "new-html-page",
+      group: "Actions",
+      label: "New HTML page",
+      hint: "Your own HTML, CSS and JavaScript",
+      icon: FileHtml,
+      run: go(() => {
+        ws.createDocWith({ title: "", content: HTML_PAGE_TEMPLATE });
       }),
     },
     {

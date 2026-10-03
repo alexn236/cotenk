@@ -54,3 +54,29 @@ export function embedApiScript(state: string | null): string {
   }
   return `<script>window.cotenk={state:${initial},save:function(d){this.state=d;try{parent.postMessage({cotenkSave:JSON.stringify(d)},"*")}catch(e){}}};</script>`;
 }
+
+/** Theme tokens exposed to embeds as --ck-* CSS variables. */
+const EMBED_TOKENS = [
+  "canvas",
+  "panel",
+  "panel-2",
+  "elev",
+  "line",
+  "ink",
+  "ink-2",
+  "ink-3",
+  "accent",
+  "accent-2",
+  "accent-dim",
+  "on-accent",
+  "danger",
+] as const;
+
+export function embedThemeCss(scheme: string): string {
+  if (typeof document === "undefined") return "";
+  const cs = getComputedStyle(document.documentElement);
+  const vars = EMBED_TOKENS.map(
+    (t) => `--ck-${t}:${cs.getPropertyValue(`--${t}`).trim()}`,
+  ).join(";");
+  return `:root{${vars};color-scheme:${scheme}}`;
+}

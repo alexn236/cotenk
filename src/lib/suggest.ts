@@ -2,6 +2,8 @@ import type { Doc, Folder } from "./types";
 import { AGENT_KINDS, AGENTS } from "./agents";
 import { addDays, extractTasks, isoDay, nextFriday } from "./tasks";
 import { docRelativePath, folderRelativePath } from "./file-sync";
+import { slashRefs, type AgentCommand } from "./slash";
+import type { Extension } from "./extensions";
 
 /**
  * Inline autocomplete for text fields: what the user is typing at the
@@ -11,11 +13,13 @@ import { docRelativePath, folderRelativePath } from "./file-sync";
  *  - `@…`      agent composer: pages + folders; pages/tasks: people and
  *              agents → `@name`
  *  - `due:…`   dates → `due:YYYY-MM-DD`
+ *  - `/…`      agent composer: the agent's commands, skills, MCP servers
+ *              and plugins → `/name` (see slash.ts)
  */
 
 export type SuggestMode = "agent" | "page";
 
-export type TriggerKind = "link" | "mention" | "due";
+export type TriggerKind = "link" | "mention" | "due" | "command";
 
 export type Trigger = {
   kind: TriggerKind;
@@ -28,9 +32,22 @@ export type Trigger = {
 
 export type SuggestItem = {
   id: string;
-  kind: "page" | "folder" | "agent" | "person" | "date";
+  kind:
+    | "page"
+    | "folder"
+    | "agent"
+    | "person"
+    | "date"
+    | "command"
+    | "skill"
+    | "mcp"
+    | "plugin";
   label: string;
   hint?: string;
+  /** Second line under the label (slash items). */
+  desc?: string;
+  /** Section heading the item is listed under. */
+  group?: string;
   /** Text that replaces the trigger. */
   insert: string;
 };
@@ -51,6 +68,12 @@ export function findTrigger(
   if (due && mode === "page") {
     const start = due.index + due[1].length;
     return { kind: "due", start, end: caret, query: due[2] };
+  }
+  // "/" at the start or after a space: commands and extensions.
+  const slash = mode === "agent" ? /(^|\s)\/([\p{L}\p{N}:._-]{0,40})$/u.exec(head) : null;
+  if (slash) {
+    const start = slash.index + slash[1].length;
+    return { kind: "command", start, end: caret, query: slash[2] };
   }
   // In the agent composer "@" references pages/folders, so titles with
   // spaces are allowed; elsewhere it's a single-word handle.
@@ -173,13 +196,60 @@ function dateItems(q: string): SuggestItem[] {
     }));
 }
 
+/** What "/" can offer: the chat agent's commands and CoTenk extensions. */
+export type SlashSource = {
+  agentName: string;
+  commands: AgentCommand[];
+  extensions: Extension[];
+};
+
+const SLASH_GROUPS = {
+  skill: "Skills",
+  mcp: "MCP servers",
+  plugin: "Plugins",
+} as const;
+
+function slashItems(src: SlashSource, q: string): SuggestItem[] {
+  const commands: SuggestItem[] = pick(src.commands, (c) => c.name, q, 8).map((c) => ({
+    id: `command:${c.name}`,
+    kind: "command",
+    label: c.hint ? `${c.name} ${c.hint}` : c.name,
+    desc: c.description,
+    group: `${src.agentName} commands`,
+    insert: `/${c.name} `,
+  }));
+  const refs = slashRefs(src.extensions);
+  const ext = (["plugin", "skill", "mcp"] as const).flatMap((kind) =>
+    pick(
+      refs.filter((r) => r.kind === kind),
+      (r) => r.name,
+      q,
+      8,
+    ).map(
+      (r): SuggestItem => ({
+        id: `${kind}:${r.name}`,
+        kind,
+        label: r.name,
+        desc: r.description,
+        group: SLASH_GROUPS[kind],
+        insert: `/${r.name} `,
+      }),
+    ),
+  );
+  // An agent command and an extension can share a name — keep both,
+  // they do different things.
+  return [...commands, ...ext];
+}
+
 export function suggestionsFor(
   trigger: Trigger,
   mode: SuggestMode,
   docs: Doc[],
   folders: Folder[],
+  slash?: SlashSource,
 ): SuggestItem[] {
   const q = norm(trigger.query);
+  if (trigger.kind === "command") return slash ? slashItems(slash, q) : [];
   if (trigger.kind === "due") return dateItems(trigger.query.trim());
   if (trigger.kind === "mention" && mode === "page") return peopleItems(docs, q);
   // [[ everywhere, @ in the agent composer: pages (+ folders for agents).

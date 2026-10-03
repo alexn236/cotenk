@@ -2,6 +2,9 @@ import { createElement, useState } from "react";
 import type { KeyboardEvent, RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useWorkspace } from "@/lib/store";
+import { useAgent } from "@/lib/agent-store";
+import { useExtensions } from "@/lib/extensions";
+import { AGENTS, type AgentKind } from "@/lib/agents";
 import {
   applySuggestion,
   findTrigger,
@@ -13,7 +16,9 @@ import { SuggestList, type Field } from "./suggest-menu";
 
 /**
  * Inline suggestions for a text field — `[[` pages, `@` people/agents
- * (or pages and folders in the agent composer), `due:` dates. Spread
+ * (or pages and folders in the agent composer), `due:` dates, and in the
+ * agent composer `/` for the agent's commands and CoTenk's skills, MCP
+ * servers and plugins (pass `agent`). Spread
  * `fieldProps` on the field, call `onKeyDown` first in the field's key
  * handler (true = consumed) and render `menu`.
  */
@@ -22,16 +27,24 @@ export function useSuggest({
   value,
   onChange,
   mode,
+  agent,
+  agentCommands = true,
   enabled = true,
 }: {
   ref: RefObject<Field | null>;
   value: string;
   onChange: (next: string) => void;
   mode: SuggestMode;
+  /** Agent the text goes to — enables "/" suggestions. */
+  agent?: AgentKind;
+  /** Offer the agent's own commands too (only where the text is sent as is). */
+  agentCommands?: boolean;
   enabled?: boolean;
 }) {
   const docs = useWorkspace((s) => s.docs);
   const folders = useWorkspace((s) => s.folders);
+  const commands = useAgent((s) => (agent ? s.commands[agent] : null));
+  const extensions = useExtensions((s) => s.items);
   const [caret, setCaret] = useState<number | null>(null);
   const [index, setIndex] = useState(0);
   /** Trigger start the user dismissed with Escape. */
@@ -45,7 +58,19 @@ export function useSuggest({
   // Only computed while a trigger is being typed.
   const items =
     trigger && tStart !== dismissed
-      ? suggestionsFor(trigger, mode, docs, folders)
+      ? suggestionsFor(
+          trigger,
+          mode,
+          docs,
+          folders,
+          agent && commands
+            ? {
+                agentName: AGENTS[agent].name,
+                commands: agentCommands ? commands : [],
+                extensions,
+              }
+            : undefined,
+        )
       : [];
   const open = items.length > 0;
   const active = Math.min(index, Math.max(items.length - 1, 0));

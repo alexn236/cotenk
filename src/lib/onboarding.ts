@@ -30,7 +30,22 @@ export const completeOnboarding = () => write(COMPLETE_KEY);
 /** The first-run "pick your agents" dialog was finished or skipped. */
 const AGENTS_KEY = "cotenk-onboarding-agents";
 export const agentOnboardingDone = () => read(AGENTS_KEY);
-export const finishAgentOnboarding = () => write(AGENTS_KEY);
+
+/**
+ * The first-run welcome flow (theme, account, agents) was finished.
+ * People who already went through the older agent dialog or the Home
+ * checklist count as done — they go straight to sign-in.
+ */
+const WELCOME_KEY = "cotenk-onboarding-welcome";
+export const welcomeFinished = () =>
+  read(WELCOME_KEY) ||
+  agentOnboardingDone() ||
+  onboardingComplete() ||
+  onboardingDismissed();
+export const finishWelcome = () => {
+  write(WELCOME_KEY);
+  write(AGENTS_KEY);
+};
 
 /** Open on Home (with the checklist) until onboarding is behind us. */
 export const onboardingPending = () =>

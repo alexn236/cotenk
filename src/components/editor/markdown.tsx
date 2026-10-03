@@ -296,7 +296,21 @@ function Img({
   );
 }
 
+/** Wide tables scroll sideways instead of squeezing words apart. */
+function Table({
+  node,
+  ...props
+}: ComponentPropsWithoutRef<"table"> & ExtraProps) {
+  void node;
+  return (
+    <div className="table-scroll">
+      <table {...props} />
+    </div>
+  );
+}
+
 const components: Components = {
+  table: Table,
   img: Img,
   h1: makeHeading("h1"),
   h2: makeHeading("h2"),

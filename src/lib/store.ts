@@ -7,6 +7,15 @@ import { toast } from "./toast";
 import { newId } from "./ids";
 import { onboardingPending } from "./onboarding";
 import { renameWikilinks, titleKey } from "./wikilinks";
+import {
+  applyTheme,
+  onSystemThemeChange,
+  readThemePref,
+  resolveTheme,
+  storeThemePref,
+  type Theme,
+  type ThemePref,
+} from "./theme";
 
 const uid = () => newId();
 
@@ -25,7 +34,7 @@ export function descendantIds(docs: Doc[], id: string): Set<string> {
   return out;
 }
 
-type Theme = "dark" | "light";
+export type { ThemePref } from "./theme";
 export type SyncStatus = "idle" | "syncing" | "synced" | "error";
 export type TaskFilter = "all" | "open" | "done";
 export type TaskGroup = "page" | "due";
@@ -47,6 +56,8 @@ type WorkspaceState = {
   railSection: RailSection;
   sidebarCollapsed: boolean;
   contentsOpen: boolean;
+  /** What the user picked; `theme` is what's on screen. */
+  themePref: ThemePref;
   theme: Theme;
   taskFilter: TaskFilter;
   taskGroup: TaskGroup;
@@ -98,7 +109,7 @@ type WorkspaceState = {
   toggleSidebar: () => void;
   toggleContents: () => void;
   toggleTheme: () => void;
-  setTheme: (t: Theme) => void;
+  setTheme: (t: ThemePref) => void;
   setTaskFilter: (f: TaskFilter) => void;
   setTaskGroup: (g: TaskGroup) => void;
   setTaskView: (v: TaskView) => void;
@@ -120,6 +131,9 @@ const local = typeof window !== "undefined" ? loadLocalWorkspace() : null;
 const initialDocs = local ? upgradeWelcome(local.docs) : seedDocs;
 const initialFolders = local?.folders ?? seedFolders;
 
+const initialThemePref: ThemePref =
+  typeof window !== "undefined" ? readThemePref() : "system";
+
 export const useWorkspace = create<WorkspaceState>((set, get) => ({
   docs: initialDocs,
   folders: initialFolders,
@@ -131,13 +145,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   railSection: onboardingPending() ? "home" : "docs",
   sidebarCollapsed: false,
   contentsOpen: true,
-  // Hydrate from the data-theme the pre-paint script already set.
-  theme:
-    (typeof document !== "undefined" &&
-    (document.documentElement.dataset.theme === "light" ||
-      document.documentElement.dataset.theme === "dark")
-      ? document.documentElement.dataset.theme
-      : "dark") as Theme,
+  // Same rules as the pre-paint script, so nothing flips on load.
+  themePref: initialThemePref,
+  theme: resolveTheme(initialThemePref),
   taskFilter: "open" as TaskFilter,
   taskGroup: "page" as TaskGroup,
   taskView: "list" as TaskView,
@@ -369,30 +379,14 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   toggleContents: () => set((s) => ({ contentsOpen: !s.contentsOpen })),
 
-  toggleTheme: () =>
-    set((s) => {
-      const theme = s.theme === "dark" ? "light" : "dark";
-      if (typeof document !== "undefined") {
-        document.documentElement.dataset.theme = theme;
-      }
-      try {
-        localStorage.setItem("cotenk-theme", theme);
-      } catch {
-        /* storage unavailable */
-      }
-      return { theme };
-    }),
+  // Toggling picks the opposite of what's on screen explicitly.
+  toggleTheme: () => get().setTheme(get().theme === "dark" ? "light" : "dark"),
 
-  setTheme: (theme) => {
-    if (typeof document !== "undefined") {
-      document.documentElement.dataset.theme = theme;
-    }
-    try {
-      localStorage.setItem("cotenk-theme", theme);
-    } catch {
-      /* storage unavailable */
-    }
-    set({ theme });
+  setTheme: (themePref) => {
+    const theme = resolveTheme(themePref);
+    applyTheme(theme);
+    storeThemePref(themePref);
+    set({ themePref, theme });
   },
 
   setTaskFilter: (f) => set({ taskFilter: f }),
@@ -489,3 +483,9 @@ export function trashFolder(id: string) {
     },
   });
 }
+
+// "System" follows the OS live — re-resolve when it switches.
+onSystemThemeChange(() => {
+  const s = useWorkspace.getState();
+  if (s.themePref === "system") s.setTheme("system");
+});

@@ -17,6 +17,7 @@ import {
   List,
   Note,
   Sparkle,
+  FileHtml,
   Storefront,
 } from "@phosphor-icons/react";
 import { useActiveDoc, useWorkspace } from "@/lib/store";
@@ -37,6 +38,8 @@ import { autosizeTextarea, useIsomorphicLayoutEffect } from "./utils";
 import { filterSlashItems } from "./slash-items";
 import { SlashMenu } from "./slash-menu";
 import { ContentsPanel } from "./contents-panel";
+import { HtmlPageView } from "./html-page";
+import { HTML_PAGE_TEMPLATE, isHtmlPage } from "@/lib/html-page";
 import { AskAgentPopover } from "./ask-agent";
 import { backlinksTo } from "@/lib/wikilinks";
 import { toast } from "@/lib/toast";
@@ -58,6 +61,12 @@ type Snap = {
 };
 
 /** Event-time helper — kept at module level so the purity rule allows it. */
+/**
+ * Editor width (px) from which the contents card fits beside the text
+ * column (720px, centered) without covering it.
+ */
+const CONTENTS_MIN_WIDTH = 1100;
+
 function nowMs() {
   return Date.now();
 }
@@ -112,6 +121,20 @@ function EditorView({ doc }: { doc: Doc }) {
   const [externalBy, setExternalBy] = useState<"agent" | "sync">("sync");
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Too narrow for the contents card beside the text: it stays hidden
+  // and the toggle shows it over the page on demand instead.
+  const [narrow, setNarrow] = useState(false);
+  const [contentsPeek, setContentsPeek] = useState(false);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) =>
+      setNarrow(entry.contentRect.width < CONTENTS_MIN_WIDTH),
+    );
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const showContents = narrow ? contentsPeek : contentsOpen;
   const titleRef = useRef<HTMLTextAreaElement | null>(null);
   const areaRefs = useRef(new Map<string, HTMLElement>());
   const pendingFocus = useRef<{ id: string; offset: number } | null>(null);
@@ -127,6 +150,14 @@ function EditorView({ doc }: { doc: Doc }) {
   const writeContent = (md: string) => {
     lastWritten.current = md;
     updateDocContent(doc.id, md);
+  };
+
+  // HTML pages are edited as source; blocks follow along so turning the
+  // page back into markdown (emptying it) starts from its real content.
+  const htmlPage = isHtmlPage(doc.content);
+  const writeHtml = (md: string) => {
+    writeContent(md);
+    setBlocks(parseBlocks(md));
   };
 
   // Live-follow edits made outside the editor — an agent writing the
@@ -798,19 +829,23 @@ function EditorView({ doc }: { doc: Doc }) {
               )}
             </AnimatePresence>
           </div>
-          <button
-            type="button"
-            onClick={toggleContents}
-            aria-label="Toggle contents"
-            aria-pressed={contentsOpen}
-            className={`grid h-6 w-6 place-items-center rounded-[6px] transition-colors duration-150 ease-out-expo ${
-              contentsOpen
-                ? "text-accent"
-                : "text-ink-3 hover:bg-hover hover:text-ink-2"
-            }`}
-          >
-            <List size={16} />
-          </button>
+          {!htmlPage && (
+            <button
+              type="button"
+              onClick={() =>
+                narrow ? setContentsPeek((p) => !p) : toggleContents()
+              }
+              aria-label="Toggle contents"
+              aria-pressed={showContents}
+              className={`grid h-6 w-6 place-items-center rounded-[6px] transition-colors duration-150 ease-out-expo ${
+                showContents
+                  ? "text-accent"
+                  : "text-ink-3 hover:bg-hover hover:text-ink-2"
+              }`}
+            >
+              <List size={16} />
+            </button>
+          )}
         </div>
       </header>
 
@@ -838,123 +873,132 @@ function EditorView({ doc }: { doc: Doc }) {
           if (files.length > 0) void addImages(files, imageAfter.current, true);
         }}
       />
-      <div
-        ref={scrollRef}
-        data-image-drop=""
-        className="flex-1 overflow-y-auto"
-        onPaste={(e) => {
-          const files = Array.from(e.clipboardData.files);
-          if (files.length === 0) return;
-          e.preventDefault();
-          void addImages(files, editingId, true);
-        }}
-        onDragOver={(e) => {
-          if (imageFiles(e.dataTransfer.files).length > 0 || e.dataTransfer.types.includes("Files")) {
+      {htmlPage ? (
+        <HtmlPageView doc={doc} onChange={writeHtml} />
+      ) : (
+        <div
+          ref={scrollRef}
+          data-image-drop=""
+          className="flex-1 overflow-y-auto"
+          onPaste={(e) => {
+            const files = Array.from(e.clipboardData.files);
+            if (files.length === 0) return;
             e.preventDefault();
-          }
-        }}
-        onDrop={(e) => {
-          const files = imageFiles(e.dataTransfer.files);
-          if (files.length === 0) return;
-          e.preventDefault();
-          void addImages(files, editingId);
-        }}
-      >
-        <div className="mx-auto w-full max-w-[720px] px-6 py-12 md:px-16">
-          <textarea
-            ref={titleRef}
-            rows={1}
-            value={doc.title}
-            autoFocus={autoFocusTitle}
-            placeholder="Untitled"
-            aria-label="Document title"
-            spellCheck={false}
-            onChange={(e) => setTitle(e.currentTarget.value)}
-            onKeyDown={onTitleKeyDown}
-            onFocus={() => {
-              titleAtFocus.current = doc.title;
-            }}
-            onBlur={() => relinkTitle(doc.id, titleAtFocus.current, doc.title)}
-            className="mb-8 block w-full resize-none bg-transparent text-[34px] font-semibold leading-[1.15] tracking-[-0.02em] text-ink outline-none placeholder:text-ink-3"
-          />
-
-          <div className="flex flex-col">
-            {blocks.map((block, i) => (
-              <Block
-                key={block.id}
-                block={block}
-                index={i}
-                ordinal={ordinals.get(block.id) ?? 1}
-                editing={editingId === block.id}
-                registerRef={registerRef}
-                onFocusableReady={onFocusableReady}
-                onStartEdit={() => focusBlock(block.id, block.text.length)}
-                onTextChange={(text) => updateBlockText(block.id, text)}
-                onAutoFormat={(type, rest) =>
-                  applyBlockType(block.id, type, rest)
-                }
-                onSlashKey={onSlashKey}
-                onSplit={(start, end) => splitBlock(block.id, start, end)}
-                onBackspaceStart={() => backspaceStart(block.id)}
-                onDelete={() => deleteBlock(block.id)}
-                onFocusPrev={(offset) => focusSibling(block.id, -1, offset)}
-                onFocusNext={(offset) => focusSibling(block.id, 1, offset)}
-                onCommit={() =>
-                  // Functional update: a blur arriving after focus already
-                  // moved to another block must not clear editingId.
-                  setEditingId((cur) => (cur === block.id ? null : cur))
-                }
-                onInsertBelow={() => insertAfter(block.id)}
-                onToggleChecked={(checked) => {
-                  // Completing a repeating task adds the next one below.
-                  const next =
-                    checked && !block.checked
-                      ? nextRepeatText(block.text, isoDay(new Date()))
-                      : null;
-                  if (!next) {
-                    patchBlock(block.id, { checked });
-                    return;
-                  }
-                  const i = blocks.findIndex((b) => b.id === block.id);
-                  const copy = createBlock("todo", next);
-                  const list = blocks.map((b) =>
-                    b.id === block.id ? { ...b, checked } : b,
-                  );
-                  list.splice(i + 1, 0, { ...copy, checked: false });
-                  sync(list);
-                }}
-                onLangChange={(lang) =>
-                  patchBlock(block.id, { lang: lang.trim() || undefined })
-                }
-                onEmbedState={(json) =>
-                  patchBlock(
-                    block.id,
-                    { text: withEmbedState(block.text, json) },
-                    `state:${block.id}`,
-                  )
-                }
-              />
-            ))}
-
-            {blocks.length === 0 && (
-              <EmptyPageHints
-                onWrite={() => insertBlockAt(0)}
-                onAskAgent={() => setMenuOpen("ask")}
-              />
-            )}
-
-            {/* click target for continuing at the end of the document */}
-            <div
-              className="min-h-[18vh] cursor-text"
-              onClick={onClickBelow}
+            void addImages(files, editingId, true);
+          }}
+          onDragOver={(e) => {
+            if (imageFiles(e.dataTransfer.files).length > 0 || e.dataTransfer.types.includes("Files")) {
+              e.preventDefault();
+            }
+          }}
+          onDrop={(e) => {
+            const files = imageFiles(e.dataTransfer.files);
+            if (files.length === 0) return;
+            e.preventDefault();
+            void addImages(files, editingId);
+          }}
+        >
+          <div className="mx-auto w-full max-w-[720px] px-6 py-12 md:px-16">
+            <textarea
+              ref={titleRef}
+              rows={1}
+              value={doc.title}
+              autoFocus={autoFocusTitle}
+              placeholder="Untitled"
+              aria-label="Document title"
+              spellCheck={false}
+              onChange={(e) => setTitle(e.currentTarget.value)}
+              onKeyDown={onTitleKeyDown}
+              onFocus={() => {
+                titleAtFocus.current = doc.title;
+              }}
+              onBlur={() => relinkTitle(doc.id, titleAtFocus.current, doc.title)}
+              className="mb-8 block w-full resize-none bg-transparent text-[34px] font-semibold leading-[1.15] tracking-[-0.02em] text-ink outline-none placeholder:text-ink-3"
             />
-            <Backlinks doc={doc} />
-            <div className="min-h-[12vh] cursor-text" onClick={onClickBelow} />
+
+            <div className="flex flex-col">
+              {blocks.map((block, i) => (
+                <Block
+                  key={block.id}
+                  block={block}
+                  index={i}
+                  ordinal={ordinals.get(block.id) ?? 1}
+                  editing={editingId === block.id}
+                  registerRef={registerRef}
+                  onFocusableReady={onFocusableReady}
+                  onStartEdit={() => focusBlock(block.id, block.text.length)}
+                  onTextChange={(text) => updateBlockText(block.id, text)}
+                  onAutoFormat={(type, rest) =>
+                    applyBlockType(block.id, type, rest)
+                  }
+                  onSlashKey={onSlashKey}
+                  onSplit={(start, end) => splitBlock(block.id, start, end)}
+                  onBackspaceStart={() => backspaceStart(block.id)}
+                  onDelete={() => deleteBlock(block.id)}
+                  onFocusPrev={(offset) => focusSibling(block.id, -1, offset)}
+                  onFocusNext={(offset) => focusSibling(block.id, 1, offset)}
+                  onCommit={() =>
+                    // Functional update: a blur arriving after focus already
+                    // moved to another block must not clear editingId.
+                    setEditingId((cur) => (cur === block.id ? null : cur))
+                  }
+                  onInsertBelow={() => insertAfter(block.id)}
+                  onToggleChecked={(checked) => {
+                    // Completing a repeating task adds the next one below.
+                    const next =
+                      checked && !block.checked
+                        ? nextRepeatText(block.text, isoDay(new Date()))
+                        : null;
+                    if (!next) {
+                      patchBlock(block.id, { checked });
+                      return;
+                    }
+                    const i = blocks.findIndex((b) => b.id === block.id);
+                    const copy = createBlock("todo", next);
+                    const list = blocks.map((b) =>
+                      b.id === block.id ? { ...b, checked } : b,
+                    );
+                    list.splice(i + 1, 0, { ...copy, checked: false });
+                    sync(list);
+                  }}
+                  onLangChange={(lang) =>
+                    patchBlock(block.id, { lang: lang.trim() || undefined })
+                  }
+                  onEmbedState={(json) =>
+                    patchBlock(
+                      block.id,
+                      { text: withEmbedState(block.text, json) },
+                      `state:${block.id}`,
+                    )
+                  }
+                />
+              ))}
+
+              {blocks.length === 0 && (
+                <EmptyPageHints
+                  onWrite={() => insertBlockAt(0)}
+                  onAskAgent={() => setMenuOpen("ask")}
+                  onHtml={() => writeHtml(HTML_PAGE_TEMPLATE)}
+                />
+              )}
+
+              {/* click target for continuing at the end of the document */}
+              <div
+                className="min-h-[18vh] cursor-text"
+                onClick={onClickBelow}
+              />
+              <Backlinks doc={doc} />
+              <div className="min-h-[12vh] cursor-text" onClick={onClickBelow} />
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      <ContentsPanel scrollRoot={scrollRef} docContent={doc.content} />
+      <ContentsPanel
+        open={showContents && !htmlPage}
+        scrollRoot={scrollRef}
+        docContent={doc.content}
+      />
 
       <AnimatePresence>
         {slashQuery !== null && (
@@ -1006,9 +1050,11 @@ function Backlinks({ doc }: { doc: Doc }) {
 function EmptyPageHints({
   onWrite,
   onAskAgent,
+  onHtml,
 }: {
   onWrite: () => void;
   onAskAgent: () => void;
+  onHtml: () => void;
 }) {
   const setRailSection = useWorkspace((s) => s.setRailSection);
   const setMarketTab = useWorkspace((s) => s.setMarketTab);
@@ -1038,6 +1084,10 @@ function EmptyPageHints({
         >
           <Storefront size={14} />
           Start from a template
+        </button>
+        <button type="button" onClick={onHtml} className={hint}>
+          <FileHtml size={14} />
+          Make it an HTML page
         </button>
       </div>
     </div>

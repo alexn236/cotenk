@@ -1,4 +1,5 @@
-import { motion } from "motion/react";
+import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import {
   CheckSquare,
   Files,
@@ -7,13 +8,14 @@ import {
   Lightning,
   MagnifyingGlass,
   Moon,
-  SignIn,
+  SignOut,
   Storefront,
   Sun,
+  UserCircle,
   type Icon,
 } from "@phosphor-icons/react";
 import { useWorkspace } from "@/lib/store";
-import { requestSignIn, useAuth } from "@/lib/auth-store";
+import { useAuth } from "@/lib/auth-store";
 import { useAgent } from "@/lib/agent-store";
 import type { RailSection } from "@/lib/types";
 
@@ -40,8 +42,6 @@ export function IconRail() {
   const theme = useWorkspace((s) => s.theme);
   const toggleTheme = useWorkspace((s) => s.toggleTheme);
   const setPaletteOpen = useWorkspace((s) => s.setPaletteOpen);
-  const email = useAuth((s) => s.user?.email ?? "");
-  const displayName = useAuth((s) => s.displayName);
   const agentBusy = useAgent(
     (s) => s.status === "running" || s.status === "starting",
   );
@@ -118,37 +118,109 @@ export function IconRail() {
             {theme === "dark" ? "Light theme" : "Dark theme"}
           </span>
         </button>
-        {email ? (
-          <button
-            type="button"
-            onClick={() => {
-              useWorkspace.getState().setSettingsSection("account");
-              setRailSection("settings");
-            }}
-            aria-label="Account"
-            title={email}
-            className="mt-2 flex h-7 w-7 items-center justify-center rounded-full border border-line bg-elev transition-colors hover:border-accent-line"
-          >
-            <span className="text-[11px] leading-none text-ink-2">
-              {((displayName || email)[0] ?? "?").toUpperCase()}
-            </span>
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() =>
-              requestSignIn(
-                "Sign in to open this workspace on your other devices.",
-              )
-            }
-            aria-label="Sign in"
-            className="group relative mt-2 flex h-7 w-7 items-center justify-center rounded-full border border-dashed border-line text-ink-3 transition-colors hover:border-accent-line hover:text-accent"
-          >
-            <SignIn size={13} />
-            <span className={TOOLTIP}>Sign in · sync & publish</span>
-          </button>
-        )}
+        <AccountMenu />
       </div>
     </aside>
+  );
+}
+
+const MENU_ITEM =
+  "flex h-8 w-full items-center gap-2 rounded-[6px] px-2 text-left text-[12.5px] text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink";
+
+/** Avatar at the bottom of the rail: who's signed in, settings, sign out. */
+function AccountMenu() {
+  const email = useAuth((s) => s.user?.email ?? "");
+  const displayName = useAuth((s) => s.displayName);
+  const signOut = useAuth((s) => s.signOut);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const initial = ((displayName || email)[0] ?? "?").toUpperCase();
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative mt-2">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-label="Account"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={`flex h-7 w-7 items-center justify-center rounded-full border bg-elev transition-colors ${
+          open ? "border-accent-line" : "border-line hover:border-accent-line"
+        }`}
+      >
+        <span className="text-[11px] leading-none text-ink-2">{initial}</span>
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            role="menu"
+            initial={{ opacity: 0, x: -4 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -4 }}
+            transition={{ duration: 0.12 }}
+            className="absolute bottom-0 left-full z-50 ml-3 w-60 rounded-[10px] border border-line bg-elev p-1 shadow-[0_12px_32px_-8px_var(--shadow)]"
+          >
+            <div className="flex items-center gap-2.5 px-2 py-2">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line bg-panel-2">
+                <span className="text-[12px] font-medium leading-none text-ink-2">
+                  {initial}
+                </span>
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-[12.5px] text-ink">
+                  {displayName || email.split("@")[0]}
+                </span>
+                <span className="block truncate text-[11.5px] text-ink-3">
+                  {email}
+                </span>
+              </span>
+            </div>
+            <div className="mx-1 my-1 h-px bg-line-soft" />
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                const ws = useWorkspace.getState();
+                ws.setSettingsSection("account");
+                ws.setRailSection("settings");
+              }}
+              className={MENU_ITEM}
+            >
+              <UserCircle size={15} />
+              Account settings
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                void signOut();
+              }}
+              className={MENU_ITEM}
+            >
+              <SignOut size={15} />
+              Sign out
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }

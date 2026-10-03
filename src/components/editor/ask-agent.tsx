@@ -9,6 +9,9 @@ import { ModelSelect } from "@/components/agents/model-select";
 import { autosizeTextarea, useIsomorphicLayoutEffect } from "./utils";
 import { useSuggest } from "@/components/ui/use-suggest";
 import { referenceContext } from "@/lib/suggest";
+import { slashContext } from "@/lib/slash";
+import { useExtensions } from "@/lib/extensions";
+import { useAgent } from "@/lib/agent-store";
 
 /**
  * Dropdown under the editor's "Ask agent" button: free-form instruction
@@ -49,6 +52,7 @@ export function AskAgentPopover({
 
 function AskAgentBody({ doc, onClose }: { doc: Doc; onClose: () => void }) {
   const folders = useWorkspace((s) => s.folders);
+  const defaultAgent = useAgent((s) => s.defaultAgent);
   const [text, setText] = useState("");
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
   useIsomorphicLayoutEffect(() => {
@@ -59,6 +63,8 @@ function AskAgentBody({ doc, onClose }: { doc: Doc; onClose: () => void }) {
     value: text,
     onChange: setText,
     mode: "agent",
+    agent: defaultAgent,
+    agentCommands: false,
   });
   const title = doc.title.trim() || "Untitled";
 
@@ -69,6 +75,7 @@ function AskAgentBody({ doc, onClose }: { doc: Doc; onClose: () => void }) {
       context: [
         docContext(doc, folders),
         referenceContext(prompt, useWorkspace.getState().docs, folders),
+        slashContext(prompt, useExtensions.getState().items, defaultAgent),
       ]
         .filter(Boolean)
         .join("\n\n"),
@@ -100,7 +107,7 @@ function AskAgentBody({ doc, onClose }: { doc: Doc; onClose: () => void }) {
                 }
               }}
               {...suggest.fieldProps}
-              placeholder="Tell the agent what to do with this page… (@ links another page)"
+              placeholder="Tell the agent what to do with this page… (@ links a page, / a skill)"
               aria-label="Instruction for the agent"
               className="block max-h-[160px] min-w-0 flex-1 resize-none overflow-y-auto break-words bg-transparent text-[13px] leading-[1.5] text-ink outline-none placeholder:text-ink-3"
             />

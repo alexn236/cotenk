@@ -61,7 +61,7 @@ export function TaskRow({
 
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
         <span
-          className={`text-[13.5px] leading-[1.5] ${
+          className={`min-w-0 text-[13.5px] leading-[1.5] [overflow-wrap:anywhere] ${
             task.done
               ? "text-ink-3 line-through decoration-ink-3"
               : "text-ink"

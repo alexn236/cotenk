@@ -1,6 +1,6 @@
 ---
 name: cotenk-workspace
-description: Use when working inside a CoTenk workspace folder (a directory of .md pages with "cotenk-id" frontmatter, e.g. ~/Documents/CoTenk) — creating, editing, renaming or moving pages, managing tasks (- [ ] with @owner and due:), or building interactive HTML embeds, charts and dashboards.
+description: Use when working inside a CoTenk workspace folder (a directory of .md pages with "cotenk-id" frontmatter, e.g. ~/Documents/CoTenk) — creating, editing, renaming or moving pages, managing tasks (- [ ] with @owner and due:), or building interactive HTML embeds, HTML pages, charts and dashboards.
 ---
 
 # Working in a CoTenk workspace
@@ -158,6 +158,32 @@ document.getElementById("sum").textContent=done+" of "+all+" tasks done";
 
 In the page, put the HTML as-is, without the code fence. Set text with `textContent`, not `innerHTML`, whenever the text comes from data.
 
+### HTML pages
+
+When the user wants a whole page that is an app, a landing page, a game or anything beyond blocks, make an **HTML page**: a page whose entire body is one HTML document. CoTenk recognises it by its first tag and runs it full-size in a sandboxed frame; the user can switch between the page and its code.
+
+```html
+# Pricing calculator
+
+<!doctype html>
+<html>
+<head>
+<style>
+  body { max-width: 760px; margin: 0 auto; padding: 48px 32px; }
+</style>
+</head>
+<body>
+  <h1>Pricing calculator</h1>
+  <script>/* … */</script>
+</body>
+</html>
+```
+
+- The body (after the frontmatter or the `# Title` line) must start with `<!doctype html>` or `<html>`. Nothing else may come before it, and no markdown after it.
+- Same rules as embeds: self-contained, no external URLs or CDNs, `var(--ck-…)` colors, `cotenk.save()` / `cotenk.state` for state, `textContent` for data. Blank lines are fine here.
+- The page background is already `var(--ck-canvas)` with `font:15px/1.6 system-ui`; set your own layout (max width, padding) in `body`.
+- Tasks and `[[links]]` inside an HTML page are not picked up — keep those on markdown pages.
+
 ## 5. Working style
 
 This is a productivity tool. Help the user get things done and keep pages easy to scan.
@@ -185,7 +211,7 @@ This is a productivity tool. Help the user get things done and keep pages easy t
 - Don't rename or move page files by hand. Edit `title:` or `folder:` instead.
 - Don't delete files, pages or sections the user didn't ask you to remove.
 - Don't tick tasks you didn't complete, and don't reassign owners unless asked.
-- Don't use external URLs, CDNs, storage APIs or blank lines in embeds.
+- Don't use external URLs, CDNs or storage APIs in embeds or HTML pages, or blank lines in embeds.
 - Don't use inline HTML, images, mermaid or nested lists in markdown.
 - Don't create folders more than one level deep, and don't put `.md` files outside the workspace or in dot-folders.
 - Don't rewrite a whole page when a targeted edit will do.

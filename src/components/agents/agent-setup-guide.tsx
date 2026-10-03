@@ -174,8 +174,8 @@ export function AgentIntro({ kind }: { kind: AgentKind }) {
   return (
     <p className="text-[12.5px] leading-relaxed text-ink-3">
       {what} It runs on your machine, starts in your workspace folder, and
-      asks before it changes a page. Changes outside that folder are
-      refused.
+      asks before it changes a page. Anything outside that folder needs
+      your approval, every time.
     </p>
   );
 }

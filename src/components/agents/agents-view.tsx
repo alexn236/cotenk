@@ -44,6 +44,8 @@ import {
 import { AgentSwitch } from "./agent-switch";
 import { useSuggest } from "@/components/ui/use-suggest";
 import { referenceContext } from "@/lib/suggest";
+import { slashContext } from "@/lib/slash";
+import { useExtensions } from "@/lib/extensions";
 import { newId } from "@/lib/ids";
 
 const MAX_ATTACHMENTS = 5;
@@ -183,6 +185,7 @@ export function AgentsView() {
     value: input,
     onChange: setInput,
     mode: "agent",
+    agent,
   });
 
   const addAttachments = async (files: File[]) => {
@@ -233,7 +236,13 @@ export function AgentsView() {
     setAttachments([]);
     files.forEach((a) => URL.revokeObjectURL(a.preview));
     const { docs, folders } = useWorkspace.getState();
-    const context = referenceContext(text, docs, folders) ?? undefined;
+    const context =
+      [
+        referenceContext(text, docs, folders),
+        slashContext(text, useExtensions.getState().items, agent),
+      ]
+        .filter(Boolean)
+        .join("\n\n") || undefined;
     void send(text, { context, images });
   };
 
@@ -269,7 +278,7 @@ export function AgentsView() {
                 if (e.key === "Escape") setEditingTitle(false);
               }}
               aria-label="Chat title"
-              className="w-48 rounded-[4px] border border-line bg-panel-2 px-1.5 py-0.5 text-[12.5px] text-ink outline-none focus:border-accent-line"
+              className="min-w-0 max-w-[480px] flex-1 rounded-[4px] border border-line bg-panel-2 px-1.5 py-0.5 text-[12.5px] text-ink outline-none focus:border-accent-line"
             />
           ) : (
             <button
@@ -279,7 +288,7 @@ export function AgentsView() {
                 setEditingTitle(true);
               }}
               title="Rename chat"
-              className="max-w-[220px] truncate rounded-[4px] px-1 text-[12.5px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink"
+              className="min-w-0 max-w-[480px] truncate rounded-[4px] px-1 text-[12.5px] font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink"
             >
               {chat.title}
             </button>
@@ -290,14 +299,14 @@ export function AgentsView() {
           </span>
         )}
         <span
-          className="inline-flex items-center gap-1.5 rounded-full border border-line bg-panel-2 px-2 py-0.5 text-[11px] text-ink-3"
+          className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-line bg-panel-2 px-2 py-0.5 text-[11px] text-ink-3"
           title={`${agentName} · ${meta.label}`}
         >
           <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
           {agentName}
         </span>
 
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           {chat && (
             <>
               {/* project assign */}
@@ -610,7 +619,7 @@ export function AgentsView() {
               onChange={(e) => setInput(e.currentTarget.value)}
               onKeyDown={onComposerKey}
               {...suggest.fieldProps}
-              placeholder={`Message ${agentName}… (@ to add a page or folder)`}
+              placeholder={`Message ${agentName}… (@ a page, / a command or skill)`}
               aria-label={`Message ${agentName}`}
               spellCheck={false}
               className="block max-h-[220px] min-w-0 flex-1 resize-none overflow-y-auto break-words bg-transparent py-1 text-[14px] leading-[1.6] text-ink outline-none placeholder:text-ink-3"

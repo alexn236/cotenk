@@ -1,10 +1,14 @@
-import { useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import type { RefObject } from "react";
 import {
   CalendarBlank,
   FileText,
   FolderSimple,
   Lightning,
+  Plug,
+  PuzzlePiece,
+  Sparkle,
+  TerminalWindow,
   User,
   type Icon,
 } from "@phosphor-icons/react";
@@ -19,6 +23,10 @@ const ICONS: Record<SuggestItem["kind"], Icon> = {
   agent: Lightning,
   person: User,
   date: CalendarBlank,
+  command: TerminalWindow,
+  skill: Sparkle,
+  mcp: Plug,
+  plugin: PuzzlePiece,
 };
 
 /** Floating list of suggestions anchored under (or above) the field. */
@@ -45,7 +53,7 @@ export function SuggestList({
       const r = el.getBoundingClientRect();
       const h = listRef.current?.offsetHeight ?? items.length * 40 + 30;
       const below = window.innerHeight - r.bottom - 6;
-      const left = Math.max(8, Math.min(r.left, window.innerWidth - 328));
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - 348));
       setPos(
         h > below && r.top > below
           ? { left, bottom: window.innerHeight - r.top + 6 }
@@ -80,36 +88,61 @@ export function SuggestList({
         bottom: pos?.bottom,
         visibility: pos ? "visible" : "hidden",
       }}
-      className="fixed z-[90] max-h-[300px] w-[320px] overflow-y-auto rounded-[10px] border border-line bg-panel p-1 shadow-[0_16px_48px_var(--color-shadow)]"
+      className="fixed z-[90] max-h-[320px] w-[340px] overflow-y-auto rounded-[10px] border border-line bg-panel p-1 shadow-[0_16px_48px_var(--color-shadow)]"
     >
       {items.map((item, i) => {
         const ItemIcon = ICONS[item.kind];
+        const heading =
+          item.group && item.group !== items[i - 1]?.group ? item.group : null;
         return (
-          <div
-            key={item.id}
-            role="option"
-            aria-selected={i === active}
-            data-active={i === active || undefined}
-            onMouseEnter={() => onHover(i)}
-            onClick={() => onPick(item)}
-            className={`flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 ${
-              i === active ? "bg-hover" : ""
-            }`}
-          >
-            <ItemIcon
-              size={14}
-              weight={item.kind === "agent" ? "fill" : "regular"}
-              className={`shrink-0 ${item.kind === "agent" ? "text-accent" : "text-ink-3"}`}
-            />
-            <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink">
-              {item.kind === "agent" || item.kind === "person" ? `@${item.label}` : item.label}
-            </span>
-            {item.hint && (
-              <span className="max-w-[140px] shrink-0 truncate font-mono text-[10.5px] text-ink-3">
-                {item.hint}
-              </span>
+          <Fragment key={item.id}>
+            {heading && (
+              <div
+                className={`px-2 pb-1 pt-1.5 text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-3 ${
+                  i > 0 ? "mt-1 border-t border-line-soft pt-2" : ""
+                }`}
+              >
+                {heading}
+              </div>
             )}
-          </div>
+            <div
+              role="option"
+              aria-selected={i === active}
+              data-active={i === active || undefined}
+              onMouseEnter={() => onHover(i)}
+              onClick={() => onPick(item)}
+              className={`flex cursor-pointer gap-2 rounded-[6px] px-2 py-1.5 ${
+                item.desc ? "items-start" : "items-center"
+              } ${i === active ? "bg-hover" : ""}`}
+            >
+              <ItemIcon
+                size={14}
+                weight={item.kind === "agent" ? "fill" : "regular"}
+                className={`shrink-0 ${item.desc ? "mt-[3px]" : ""} ${
+                  item.kind === "agent" || item.kind === "skill"
+                    ? "text-accent"
+                    : "text-ink-3"
+                }`}
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[12.5px] text-ink">
+                  {item.kind === "agent" || item.kind === "person"
+                    ? `@${item.label}`
+                    : item.label}
+                </span>
+                {item.desc && (
+                  <span className="block truncate text-[11.5px] text-ink-3">
+                    {item.desc}
+                  </span>
+                )}
+              </span>
+              {item.hint && (
+                <span className="max-w-[140px] shrink-0 truncate font-mono text-[10.5px] text-ink-3">
+                  {item.hint}
+                </span>
+              )}
+            </div>
+          </Fragment>
         );
       })}
       <div className="border-t border-line-soft px-2 pb-0.5 pt-1.5 font-mono text-[10px] text-ink-3">

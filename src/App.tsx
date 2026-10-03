@@ -12,7 +12,6 @@ import { lazyView, ViewBoundary } from "@/components/ui/view-boundary";
 import { ImportLayer } from "@/components/import/import-layer";
 import { PermissionDialog } from "@/components/agents/permission-dialog";
 import { AgentSetupGuide } from "@/components/agents/agent-setup-guide";
-import { AgentOnboarding } from "@/components/agents/agent-onboarding";
 
 // Views other than the editor load on first visit (code-split). A chunk
 // that fails to load is retried and the view is fenced by an error
@@ -126,7 +125,6 @@ export default function App() {
       <ImportLayer />
       <PermissionDialog />
       <AgentSetupGuide />
-      <AgentOnboarding />
       <Toaster />
     </AuthGate>
   );

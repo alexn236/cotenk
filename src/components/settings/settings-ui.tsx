@@ -40,7 +40,8 @@ export function Row({
           {desc && <div className="mt-0.5 text-[12px] text-ink-3">{desc}</div>}
         </div>
       </div>
-      {children}
+      {/* controls keep their size; the text column wraps instead */}
+      {children && <div className="flex shrink-0 items-center">{children}</div>}
     </div>
   );
 }

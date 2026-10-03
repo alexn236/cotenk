@@ -15,6 +15,7 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 import { openWelcomePage, useWorkspace } from "@/lib/store";
+import { isHtmlPage } from "@/lib/html-page";
 import { requestSignIn, useAuth } from "@/lib/auth-store";
 import { useAgent } from "@/lib/agent-store";
 import { useAgentSetup } from "@/lib/agent-setup";
@@ -40,6 +41,10 @@ const stagger = (i: number) => Math.min(i * 0.04, 0.3);
 
 /** First non-heading text line of a doc, stripped of markdown marks. */
 function docPreview(content: string): string {
+  if (isHtmlPage(content)) {
+    const title = /<title[^>]*>([^<]*)<\/title>/i.exec(content)?.[1]?.trim();
+    return title ? `HTML page · ${title}` : "HTML page";
+  }
   for (const raw of content.split("\n")) {
     const line = raw.trim();
     if (
@@ -149,7 +154,7 @@ export function HomeView() {
       </header>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[860px] px-6 py-10 md:px-12">
+        <div className="@container mx-auto w-full max-w-[860px] px-6 py-10 md:px-12">
           {/* greeting */}
           <motion.div {...rise(0)}>
             <h1 className="text-[24px] font-semibold tracking-[-0.01em] text-ink">
@@ -165,7 +170,7 @@ export function HomeView() {
           {/* quick actions */}
           <motion.div
             {...rise(1)}
-            className="mt-7 grid grid-cols-2 gap-2 md:grid-cols-4"
+            className="mt-7 grid grid-cols-2 gap-2 @2xl:grid-cols-4"
           >
             <QuickAction
               icon={Plus}
@@ -219,7 +224,7 @@ export function HomeView() {
           )}
 
           {/* recent + tasks split */}
-          <div className="mt-10 grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
+          <div className="mt-10 grid grid-cols-1 gap-x-10 gap-y-8 @xl:grid-cols-2">
             <section>
               <motion.div {...rise(3)} className={SECTION_LABEL}>
                 <FileText size={12} />
@@ -599,7 +604,7 @@ function DocCard({
           {doc.title.trim() === "" ? "Untitled" : doc.title}
         </span>
       </div>
-      <p className="mt-2 line-clamp-2 min-h-[2.6em] text-[12px] leading-[1.3] text-ink-3">
+      <p className="mt-2 line-clamp-2 min-h-[2.6em] text-[12px] leading-[1.3] text-ink-3 [overflow-wrap:anywhere]">
         {docPreview(doc.content)}
       </p>
       <span className="mt-2.5 font-mono text-[11px] text-ink-3">

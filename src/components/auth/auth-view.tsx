@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { CloudArrowUp, Devices, Storefront, X } from "@phosphor-icons/react";
-import { useAuth, type DialogMode } from "@/lib/auth-store";
+import { X } from "@phosphor-icons/react";
+import { AUTH_TITLES, useAuth, type DialogMode } from "@/lib/auth-store";
 import { Modal } from "@/components/ui/modal";
 
 const FIELD =
@@ -11,13 +11,6 @@ const SUBMIT =
   "mt-4 h-9 w-full rounded-[8px] bg-accent text-[13px] font-medium text-on-accent transition-[filter,transform] duration-150 hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
 const LINK =
   "text-accent-2 transition-colors duration-150 hover:text-accent";
-
-const TITLES: Record<DialogMode, string> = {
-  signin: "Sign in",
-  signup: "Create account",
-  reset: "Reset password",
-  recovery: "Set a new password",
-};
 
 /** Shared submit wrapper: busy flag plus inline error / note. */
 function useSubmit() {
@@ -336,25 +329,10 @@ function NewPasswordForm() {
   );
 }
 
-const PERKS = [
-  {
-    icon: Devices,
-    text: "Open your pages on every device — they sync through Supabase.",
-  },
-  {
-    icon: CloudArrowUp,
-    text: "Pages you made on this device can come along — you choose which.",
-  },
-  {
-    icon: Storefront,
-    text: "Publish pages to the marketplace under your name.",
-  },
-];
-
 /**
- * Sign-in dialog. Opens from anywhere via `requestSignIn(reason)` — the
- * workspace itself works without an account, so this only appears when
- * the user asks for something that needs one (sync, publish, community).
+ * Auth dialog over the app — signing in itself happens on the welcome
+ * screen, so this is for setting a new password (Settings → Account, or
+ * after a reset link).
  */
 export function SignInDialog() {
   const open = useAuth((s) => s.dialogOpen);
@@ -363,57 +341,22 @@ export function SignInDialog() {
   const close = useAuth((s) => s.closeDialog);
 
   return (
-    <Modal open={open} onClose={close} width={720}>
-      <div className="grid grid-cols-1 md:grid-cols-[1fr_300px]">
-        <div className="hidden flex-col justify-between border-r border-line-soft bg-panel-2/60 p-6 md:flex">
-          <div>
-            <div className="flex h-9 w-9 items-center justify-center rounded-[9px] bg-accent-dim">
-              <span className="text-[15px] font-semibold leading-none text-accent">
-                C
-              </span>
-            </div>
-            <h2 className="mt-5 text-[19px] font-semibold tracking-[-0.01em] text-ink">
-              Keep this workspace
-            </h2>
-            <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-3">
-              {reason ??
-                "Your pages live on this device right now. An account keeps them everywhere."}
-            </p>
-          </div>
-          <ul className="mt-8 flex flex-col gap-3">
-            {PERKS.map(({ icon: PIcon, text }) => (
-              <li key={text} className="flex items-start gap-2.5">
-                <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-[6px] border border-line-soft bg-panel text-accent">
-                  <PIcon size={12} />
-                </span>
-                <span className="text-[12px] leading-relaxed text-ink-2">
-                  {text}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className="relative p-6">
-          <button
-            type="button"
-            onClick={close}
-            aria-label="Close"
-            className="absolute right-3 top-3 grid h-6 w-6 place-items-center rounded-[6px] text-ink-3 transition-colors duration-150 hover:bg-hover hover:text-ink-2"
-          >
-            <X size={14} />
-          </button>
-          <h3 className="text-[14px] font-semibold text-ink">{TITLES[mode]}</h3>
-          {reason && (
-            <p className="mt-1 text-[12px] leading-snug text-ink-3 md:hidden">
-              {reason}
-            </p>
-          )}
-          <div className="mt-4">
-            <AuthForm />
-          </div>
-          <p className="mt-4 text-center text-[11.5px] text-ink-3">
-            Agents run locally and never need an account.
-          </p>
+    <Modal open={open} onClose={close} width={360}>
+      <div className="relative p-6">
+        <button
+          type="button"
+          onClick={close}
+          aria-label="Close"
+          className="absolute right-3 top-3 grid h-6 w-6 place-items-center rounded-[6px] text-ink-3 transition-colors duration-150 hover:bg-hover hover:text-ink-2"
+        >
+          <X size={14} />
+        </button>
+        <h3 className="text-[14px] font-semibold text-ink">{AUTH_TITLES[mode]}</h3>
+        {reason && (
+          <p className="mt-1 text-[12px] leading-snug text-ink-3">{reason}</p>
+        )}
+        <div className="mt-4">
+          <AuthForm />
         </div>
       </div>
     </Modal>

@@ -163,7 +163,8 @@ function PublishForm({ doc, onClose }: { doc: Doc; onClose: () => void }) {
         listing.
       </p>
       {error && <p className="text-[12px] text-danger">{error}</p>}
-      <div className="flex justify-end gap-2">
+      {/* pinned to the bottom so Publish stays reachable on short windows */}
+      <div className="sticky bottom-0 -mx-4 -mb-4 flex justify-end gap-2 border-t border-line-soft bg-panel px-4 py-3">
         <button type="button" onClick={onClose} className={btn.secondary}>
           Cancel
         </button>

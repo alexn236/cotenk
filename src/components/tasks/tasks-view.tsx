@@ -284,7 +284,7 @@ export function TasksView() {
                     type="button"
                     disabled={!group.docId}
                     onClick={() => group.docId && setActiveDoc(group.docId)}
-                    className="group/hdr mb-1 flex items-center gap-1.5 px-2 text-left disabled:cursor-default"
+                    className="group/hdr mb-1 flex max-w-full items-center gap-1.5 px-2 text-left disabled:cursor-default"
                   >
                     {group.docId && (
                       <FileText
@@ -293,7 +293,7 @@ export function TasksView() {
                       />
                     )}
                     <span
-                      className={`truncate text-[11px] font-medium uppercase tracking-[0.08em] transition-colors duration-150 ${
+                      className={`min-w-0 truncate text-[11px] font-medium uppercase tracking-[0.08em] transition-colors duration-150 ${
                         group.tone === "danger"
                           ? "text-danger"
                           : group.tone === "accent"
@@ -303,7 +303,7 @@ export function TasksView() {
                     >
                       {group.label}
                     </span>
-                    <span className="font-mono text-[11px] text-ink-3">
+                    <span className="shrink-0 font-mono text-[11px] text-ink-3">
                       {group.items.length}
                     </span>
                   </button>

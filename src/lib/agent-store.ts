@@ -1,6 +1,11 @@
 import { create } from "zustand";
 import { getSupabase } from "./supabase";
-import { acpClient, type AgentEvent } from "./agent/acp-client";
+import {
+  acpClient,
+  onAgentCommands,
+  type AgentCommand,
+  type AgentEvent,
+} from "./agent/acp-client";
 import type { ModelOption } from "./agent-models";
 import { workspacePreamble } from "./agent-context";
 import { AGENT_KINDS, isAgentKind, type AgentKind } from "./agents";
@@ -63,6 +68,8 @@ type AgentState = {
   /** Chat whose turn is running (one turn at a time). */
   runningChatId: string | null;
   models: PerAgent<ModelOption[]>;
+  /** Slash commands each agent offers itself (/mcp, /review, …). */
+  commands: PerAgent<AgentCommand[]>;
   /** Account default model per agent, as reported over ACP. */
   currentModel: PerAgent<string | null>;
   /** Agent for new chats and one-off requests (Ask agent, tasks, …). */
@@ -438,6 +445,7 @@ export const useAgent = create<AgentState>()((set, get) => ({
   activeChatId: null,
   runningChatId: null,
   models: perAgent(() => []),
+  commands: perAgent(() => []),
   currentModel: perAgent(() => null),
   // Fresh installs start on the built-in agent; setup moves the default
   // to whichever agent gets connected (agent-setup.ts autoPickDefault).
@@ -507,7 +515,14 @@ export const useAgent = create<AgentState>()((set, get) => ({
     }
     const chatId = chat.id;
     const agent = chat.agent;
-    const firstTurn = chat.messages.length === 0;
+    // An agent's own slash command (/review …) must reach it as typed —
+    // nothing in front — so the workspace preamble waits for the first
+    // ordinary message.
+    const isCommand = (t: string) => isAgentCommand(t, st.commands[agent]);
+    const command = isCommand(prompt);
+    const firstTurn =
+      !command &&
+      !chat.messages.some((m) => m.role === "user" && !isCommand(m.text));
     const now = Date.now();
 
     set((s) => ({
@@ -564,11 +579,15 @@ export const useAgent = create<AgentState>()((set, get) => ({
       let streamErr: string | null = null;
       // The first turn of every chat carries the workspace conventions,
       // so any ACP agent knows how CoTenk pages and embeds are shaped.
-      const wire = [
-        firstTurn ? workspacePreamble(agent) : null,
-        opts?.context?.trim() || null,
-        prompt,
-      ]
+      const wire = (
+        command
+          ? [prompt]
+          : [
+              firstTurn ? workspacePreamble(agent) : null,
+              opts?.context?.trim() || null,
+              prompt,
+            ]
+      )
         .filter(Boolean)
         .join("\n\n");
       const wireImages = await Promise.all(
@@ -766,3 +785,13 @@ export const useActiveChat = () =>
   useAgent(
     (s) => s.chats.find((c) => c.id === s.activeChatId) ?? null,
   );
+
+/** True when `text` starts with one of the agent's own slash commands. */
+export function isAgentCommand(text: string, commands: AgentCommand[]): boolean {
+  const m = /^\/([^\s/]+)/.exec(text.trim());
+  return !!m && commands.some((c) => c.name === m[1]);
+}
+
+onAgentCommands((kind, cmds) =>
+  useAgent.setState((s) => ({ commands: { ...s.commands, [kind]: cmds } })),
+);

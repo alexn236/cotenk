@@ -1,14 +1,15 @@
 import { create } from "zustand";
 import type { AgentKind } from "./agents";
 import { track } from "./analytics";
-import { AGENTS } from "./agents";
-import { toast } from "./toast";
 
 /**
  * Review of agent actions. ACP agents ask before they edit a file or run
  * a command (`session/request_permission`); instead of auto-approving,
  * CoTenk shows the change as a block diff and lets the person decide.
- * Reading and searching never need approval.
+ * Reading and searching inside the workspace folder need no approval.
+ * Anything that reaches outside it — reading, changing, a command with an
+ * outside path — always waits for the person, one step at a time, also
+ * with auto-approve on.
  */
 
 export type ApprovalMode = "review" | "auto";
@@ -43,6 +44,8 @@ export type PermissionRequest = {
   cwd: string | null;
   /** Why this step needs a closer look (shown in the review dialog). */
   note?: string;
+  /** Set when the step reaches outside the workspace folder. */
+  outside?: string | null;
 };
 
 /** Tool kinds that only look at things — never worth a prompt. */
@@ -199,25 +202,18 @@ export function requestPermission(
   let note = req.note;
   let forceReview = false;
 
-  // Changes stay inside the workspace folder — whatever the approval mode.
-  const writes =
-    isCommand ||
-    req.diffs.length > 0 ||
-    ["edit", "delete", "move"].includes(req.kind ?? "");
-  if (req.cwd && writes) {
-    const stray = req.paths.find((p) => p.trim() !== "" && !isInside(p, req.cwd!));
+  // Outside the workspace folder nothing happens without the person —
+  // whatever the approval mode, and never "for the whole chat".
+  let outside: string | null = null;
+  if (req.cwd) {
+    outside =
+      req.paths.find((p) => p.trim() !== "" && !isInside(p, req.cwd!)) ?? null;
     const cmd = isCommand && req.command ? inspectCommand(req.command, req.cwd) : null;
-    const outside = stray ?? cmd?.outside ?? null;
+    outside ??= cmd?.outside ?? null;
     if (outside) {
-      track("agent_permission", { decision: "blocked_outside", kind: req.kind, agent: req.agent });
-      toast(
-        `Blocked: ${AGENTS[req.agent].name} tried to change something outside your workspace folder (${outside}).`,
-        { tone: "error", ttlMs: 8000 },
-      );
-      const reject = pick(req.options, ["reject_once", "reject_always"]);
-      return Promise.resolve(reject?.optionId ?? null);
-    }
-    if (cmd?.unsure) {
+      forceReview = true;
+      note = `This reaches outside your workspace folder: ${outside}`;
+    } else if (cmd?.unsure) {
       forceReview = true;
       note =
         "This command uses a relative or home-folder path, so CoTenk can't tell whether it stays inside your workspace folder.";
@@ -225,8 +221,8 @@ export function requestPermission(
   }
 
   const autoAllow =
-    safe ||
-    (!forceReview &&
+    !forceReview &&
+    (safe ||
       (allowedForChat.has(chatKey) ||
         (mode === "auto" && !(isCommand && confirmCommands))));
   if (autoAllow) {
@@ -234,7 +230,9 @@ export function requestPermission(
     return Promise.resolve(opt?.optionId ?? null);
   }
   const id = ++seq;
-  usePermissions.setState((s) => ({ queue: [...s.queue, { ...req, note, id }] }));
+  usePermissions.setState((s) => ({
+    queue: [...s.queue, { ...req, note, outside, id }],
+  }));
   return new Promise((resolve) => resolvers.set(id, resolve));
 }
 
@@ -258,6 +256,8 @@ export function answerPermission(
     settle(id, opt?.optionId ?? null);
     return;
   }
+  // Outside the folder every step is its own decision.
+  if (req.outside && decision === "allow_chat") decision = "allow";
   if (decision === "allow_chat") {
     allowedForChat.add(`${req.agent}:${req.sessionId}:${req.kind ?? "other"}`);
   }
