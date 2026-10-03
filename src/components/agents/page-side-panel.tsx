@@ -9,18 +9,19 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { useWorkspace } from "@/lib/store";
-import { useAgent } from "@/lib/agent-store";
+import { followAgentEnabled, setFollowAgent } from "@/lib/agent-panel";
 import { PageEditor } from "@/components/editor/doc-editor";
 
 /**
  * A page next to the agent chat, so you can read along while the agent
- * works. "Follow" jumps to whichever page the agent is changing right
- * now; the editor's own highlight shows the blocks it wrote. Any page can
- * be picked by hand — picking one turns following off.
+ * works. With "Follow agent" on, the chat opens it on whichever page the
+ * agent is changing (see AgentsView); the editor's own highlight shows
+ * the blocks it wrote. Any page can be picked by hand — picking one turns
+ * following off.
  */
 
 const WIDTH_KEY = "cotenk-agents-panel-width";
-const FOLLOW_KEY = "cotenk-agents-panel-follow";
+
 const MIN_W = 340;
 const MAX_W = 900;
 
@@ -28,15 +29,6 @@ function readNumber(key: string, fallback: number) {
   try {
     const v = Number(localStorage.getItem(key));
     return Number.isFinite(v) && v > 0 ? v : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function readFlag(key: string, fallback: boolean) {
-  try {
-    const v = localStorage.getItem(key);
-    return v === null ? fallback : v === "1";
   } catch {
     return fallback;
   }
@@ -52,52 +44,27 @@ function writeLs(key: string, value: string) {
 
 export function PageSidePanel({
   docId,
-  onDocChange,
+  flashFrom,
+  onPick,
   onClose,
 }: {
   docId: string | null;
-  onDocChange: (id: string) => void;
+  /** Content before the agent change that opened this page (for the glow). */
+  flashFrom: { id: string; content: string } | null;
+  /** A page picked by hand. */
+  onPick: (id: string) => void;
   onClose: () => void;
 }) {
-  /** Content before the agent change that switched pages (for the glow). */
-  const [flashFrom, setFlashFrom] = useState<{ id: string; content: string } | null>(
-    null,
-  );
   const doc = useWorkspace((s) => s.docs.find((d) => d.id === docId) ?? null);
   const setActiveDoc = useWorkspace((s) => s.setActiveDoc);
   const [width, setWidth] = useState(() =>
     Math.min(MAX_W, Math.max(MIN_W, readNumber(WIDTH_KEY, 520))),
   );
-  const [follow, setFollow] = useState(() => readFlag(FOLLOW_KEY, true));
+  const [follow, setFollow] = useState(followAgentEnabled);
   const [picking, setPicking] = useState(false);
-  const onDocChangeRef = useRef(onDocChange);
-  useEffect(() => {
-    onDocChangeRef.current = onDocChange;
-  }, [onDocChange]);
-
-  // Follow the agent: the page whose content changes while a turn runs
-  // (or a page it just created) comes into view.
-  useEffect(() => {
-    if (!follow) return;
-    return useWorkspace.subscribe((s, prev) => {
-      if (s.docs === prev.docs) return;
-      if (useAgent.getState().status !== "running") return;
-      const before = new Map(prev.docs.map((d) => [d.id, d]));
-      const changed = s.docs.find((d) => {
-        const old = before.get(d.id);
-        return !old || old.content !== d.content || old.title !== d.title;
-      });
-      if (!changed) return;
-      // A page that's already open highlights the change itself; one we
-      // switch to needs to know what it looked like before.
-      setFlashFrom({ id: changed.id, content: before.get(changed.id)?.content ?? "" });
-      onDocChangeRef.current(changed.id);
-    });
-  }, [follow]);
-
   const toggleFollow = () => {
     setFollow((f) => {
-      writeLs(FOLLOW_KEY, f ? "0" : "1");
+      setFollowAgent(!f);
       return !f;
     });
   };
@@ -156,9 +123,8 @@ export function PageSidePanel({
             current={docId}
             onPick={(id) => {
               setPicking(false);
-              setFlashFrom(null);
               if (follow) toggleFollow();
-              onDocChange(id);
+              onPick(id);
             }}
             onClose={() => setPicking(false)}
           />

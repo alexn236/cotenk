@@ -50,19 +50,9 @@ import { slashContext } from "@/lib/slash";
 import { useExtensions } from "@/lib/extensions";
 import { newId } from "@/lib/ids";
 import { PageSidePanel } from "./page-side-panel";
+import { followAgentEnabled } from "@/lib/agent-panel";
 
-const PANEL_OPEN_KEY = "cotenk-agents-panel-open";
 const PANEL_DOC_KEY = "cotenk-agents-panel-doc";
-
-function readPanelOpen(): boolean {
-  try {
-    const v = localStorage.getItem(PANEL_OPEN_KEY);
-    if (v !== null) return v === "1";
-  } catch {
-    /* storage unavailable */
-  }
-  return typeof window !== "undefined" && window.innerWidth >= 1200;
-}
 
 function readPanelDoc(): string | null {
   const { docs, activeDocId } = useWorkspace.getState();
@@ -172,16 +162,12 @@ export function AgentsView() {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
   // The page next to the chat — read along while the agent writes.
-  const [panelOpen, setPanelOpen] = useState(readPanelOpen);
+  // Closed until the agent writes into a page (or you open it).
+  const [panelOpen, setPanelOpen] = useState(false);
   const [panelDoc, setPanelDoc] = useState<string | null>(readPanelDoc);
-  const togglePanel = (open: boolean) => {
-    setPanelOpen(open);
-    try {
-      localStorage.setItem(PANEL_OPEN_KEY, open ? "1" : "0");
-    } catch {
-      /* storage unavailable */
-    }
-  };
+  const [flashFrom, setFlashFrom] = useState<{ id: string; content: string } | null>(
+    null,
+  );
   const showPanelDoc = (id: string) => {
     setPanelDoc(id);
     try {
@@ -190,6 +176,27 @@ export function AgentsView() {
       /* storage unavailable */
     }
   };
+
+  // Follow the agent: the page whose content changes while a turn runs
+  // (or one it just created) opens next to the chat, glowing where it
+  // changed.
+  useEffect(
+    () =>
+      useWorkspace.subscribe((s, prev) => {
+        if (s.docs === prev.docs) return;
+        if (useAgent.getState().status !== "running" || !followAgentEnabled()) return;
+        const before = new Map(prev.docs.map((d) => [d.id, d]));
+        const changed = s.docs.find((d) => {
+          const old = before.get(d.id);
+          return !old || old.content !== d.content || old.title !== d.title;
+        });
+        if (!changed) return;
+        setFlashFrom({ id: changed.id, content: before.get(changed.id)?.content ?? "" });
+        showPanelDoc(changed.id);
+        setPanelOpen(true);
+      }),
+    [],
+  );
 
   const running = status === "running" || status === "starting";
   // One turn at a time: another chat's turn blocks this composer.
@@ -436,7 +443,7 @@ export function AgentsView() {
             )}
             <button
               type="button"
-              onClick={() => togglePanel(!panelOpen)}
+              onClick={() => setPanelOpen((o) => !o)}
               aria-pressed={panelOpen}
               aria-label={panelOpen ? "Hide page" : "Show page next to the chat"}
               title={panelOpen ? "Hide page" : "Show page next to the chat"}
@@ -734,8 +741,12 @@ export function AgentsView() {
       {panelOpen && (
         <PageSidePanel
           docId={panelDoc}
-          onDocChange={showPanelDoc}
-          onClose={() => togglePanel(false)}
+          flashFrom={flashFrom}
+          onPick={(id) => {
+            setFlashFrom(null);
+            showPanelDoc(id);
+          }}
+          onClose={() => setPanelOpen(false)}
         />
       )}
     </div>
