@@ -1,7 +1,7 @@
 /**
- * Curated page templates that ship with CoTenk. They double as the
- * "official" shelf of the marketplace and as examples of what agents can
- * build: plain markdown plus self-contained HTML embeds.
+ * Curated page templates that ship with CoTenk. They fill the template
+ * gallery and double as examples of what agents can build: plain
+ * markdown plus self-contained HTML embeds.
  */
 
 export type TemplateCategory =
@@ -317,6 +317,6 @@ What got in the way, what worked.`,
 
 ## Open decisions
 
-- [ ] Pricing for marketplace listings @you`,
+- [ ] Pricing for the pro plan @you`,
   },
 ];

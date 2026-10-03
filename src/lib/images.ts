@@ -1,17 +1,20 @@
 import { useEffect, useState } from "react";
-import { getSupabase } from "./supabase";
-import { useAuth } from "./auth-store";
+import { invoke } from "@tauri-apps/api/core";
 import { newId } from "./ids";
+import { saveBytes } from "./files";
+import { isDesktop, resolveWorkspaceDir } from "./workspace";
 
 /**
- * Images in pages and agent chats. Signed in, the file goes to the private
- * Supabase bucket `note-images` (folder = workspace id) and the markdown /
- * chat message keeps `cotenk-image:<path>`. Signed out there is no cloud, so
- * a small data URL is embedded instead.
+ * Images and files in pages and agent chats, stored locally.
+ *
+ * Desktop: the file goes into the workspace folder (`assets/…`), next to
+ * the pages, and markdown keeps `cotenk-image:assets/<name>` — agents see
+ * the same files. In the browser there is no folder, so a small image is
+ * embedded as a data URL and files can't be attached.
  */
 
 export const IMAGE_REF = "cotenk-image:";
-export const BUCKET = "note-images";
+const ASSETS_DIR = "assets";
 const MAX_INPUT = 25 * 1024 * 1024;
 const MAX_GIF = 10 * 1024 * 1024;
 const INLINE_MAX = 600 * 1024;
@@ -21,11 +24,6 @@ export const isImageFile = (f: File) =>
 
 export const imageFiles = (list: FileList | File[] | null | undefined) =>
   Array.from(list ?? []).filter(isImageFile);
-
-const signedInWorkspace = () => {
-  const { status, workspaceId } = useAuth.getState();
-  return status === "signedIn" ? workspaceId : null;
-};
 
 function canvasBlob(canvas: HTMLCanvasElement, type: string, q: number) {
   return new Promise<Blob>((resolve, reject) =>
@@ -41,13 +39,13 @@ function canvasBlob(canvas: HTMLCanvasElement, type: string, q: number) {
 export async function prepareImage(file: File): Promise<Blob> {
   if (!isImageFile(file)) throw new Error("That file isn't a supported image.");
   if (file.size > MAX_INPUT) throw new Error("That image is larger than 25 MB.");
-  const cloud = !!signedInWorkspace();
+  const onDisk = isDesktop();
   if (file.type === "image/gif") {
     if (file.size > MAX_GIF) throw new Error("That GIF is larger than 10 MB.");
-    if (cloud || file.size <= INLINE_MAX) return file;
-    throw new Error("Sign in to add larger GIFs.");
+    if (onDisk || file.size <= INLINE_MAX) return file;
+    throw new Error("Larger GIFs need the desktop app.");
   }
-  const maxSide = cloud ? 1920 : 1200;
+  const maxSide = onDisk ? 1920 : 1200;
   const bitmap = await createImageBitmap(file);
   try {
     const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
@@ -56,7 +54,7 @@ export async function prepareImage(file: File): Promise<Blob> {
     canvas.width = Math.max(1, Math.round(bitmap.width * scale));
     canvas.height = Math.max(1, Math.round(bitmap.height * scale));
     canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    return await canvasBlob(canvas, "image/webp", cloud ? 0.86 : 0.72);
+    return await canvasBlob(canvas, "image/webp", onDisk ? 0.86 : 0.72);
   } finally {
     bitmap.close();
   }
@@ -82,25 +80,57 @@ const EXT: Record<string, string> = {
   "image/gif": "gif",
 };
 
+const MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+};
+
+/**
+ * Absolute path of a workspace-relative asset path. Refuses anything that
+ * could point outside the workspace folder.
+ */
+async function assetPath(rel: string): Promise<string> {
+  const clean = rel.replace(/\\/g, "/");
+  if (!clean || clean.startsWith("/") || /^[a-z]:/i.test(clean) || clean.split("/").includes("..")) {
+    throw new Error("Invalid file reference.");
+  }
+  const root = (await resolveWorkspaceDir()).replace(/[\\/]+$/, "");
+  return `${root}/${clean}`;
+}
+
+async function writeAsset(rel: string, blob: Blob) {
+  await invoke("fs_write_b64", {
+    path: await assetPath(rel),
+    data: await blobToBase64(blob),
+  });
+}
+
+export async function readAsset(rel: string): Promise<Uint8Array> {
+  const b64 = await invoke<string>("fs_read_b64", { path: await assetPath(rel) });
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
 /** Saves an image and returns the reference to put in markdown / a message. */
 export async function storeImage(
   blob: Blob,
   kind: "note" | "chat",
 ): Promise<string> {
-  const ws = signedInWorkspace();
-  if (!ws) {
+  if (!isDesktop()) {
     if (blob.size > INLINE_MAX) {
-      throw new Error("Sign in to add larger images.");
+      throw new Error("Larger images need the desktop app.");
     }
     return blobToDataUrl(blob);
   }
-  const path = `${ws}/${kind}/${newId()}.${EXT[blob.type] ?? "webp"}`;
-  const { error } = await getSupabase()
-    .storage.from(BUCKET)
-    .upload(path, blob, { contentType: blob.type, cacheControl: "31536000" });
-  if (error) throw new Error(`Couldn't upload the image: ${error.message}`);
-  const ref = IMAGE_REF + path;
-  cache.set(ref, { url: URL.createObjectURL(blob), exp: Infinity });
+  const rel = `${ASSETS_DIR}/${kind === "chat" ? "chat/" : ""}${newId()}.${EXT[blob.type] ?? "webp"}`;
+  await writeAsset(rel, blob);
+  const ref = IMAGE_REF + rel;
+  cache.set(ref, URL.createObjectURL(blob));
   return ref;
 }
 
@@ -136,33 +166,24 @@ export function parseFileMd(md: string): FileMd | null {
   return m ? { name: m[1], path: m[2], size: m[3] ? Number(m[3]) : null } : null;
 }
 
-/** Uploads any file (account storage only) and returns its markdown. */
+/** Copies any file into the workspace folder and returns its markdown. */
 export async function storeFile(file: File): Promise<string> {
-  const ws = signedInWorkspace();
-  if (!ws) throw new Error("Sign in to attach files.");
+  if (!isDesktop()) throw new Error("Attaching files needs the desktop app.");
   if (file.size > MAX_FILE) throw new Error("Files can be up to 25 MB.");
   const safe =
     file.name.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(-80) ||
     "file";
-  const path = `${ws}/file/${newId()}-${safe}`;
-  const { error } = await getSupabase()
-    .storage.from(BUCKET)
-    .upload(path, file, {
-      contentType: file.type || "application/octet-stream",
-      cacheControl: "31536000",
-    });
-  if (error) throw new Error(`Couldn't upload the file: ${error.message}`);
+  const rel = `${ASSETS_DIR}/files/${newId()}-${safe}`;
+  await writeAsset(rel, file);
   const label = file.name.replace(/[[\]\n]/g, " ").trim() || "file";
-  return `[${label}](${FILE_REF}${path}#s=${file.size})`;
+  return `[${label}](${FILE_REF}${rel}#s=${file.size})`;
 }
 
-/** A short-lived link that downloads the stored file. */
-export async function fileDownloadUrl(path: string, name: string): Promise<string> {
-  const { data, error } = await getSupabase()
-    .storage.from(BUCKET)
-    .createSignedUrl(path, 120, { download: name });
-  if (error || !data) throw new Error(error?.message ?? "File not found.");
-  return data.signedUrl;
+/** Saves a copy of an attached file wherever the user picks. */
+export async function downloadFile(path: string, name: string): Promise<void> {
+  if (!isDesktop()) throw new Error("Attached files open in the desktop app.");
+  const bytes = await readAsset(path);
+  await saveBytes(name, bytes, "application/octet-stream");
 }
 
 /** File name without extension, safe inside `![alt](…)`. */
@@ -175,25 +196,25 @@ export const imageAlt = (name: string) =>
 
 /* ---------- showing references ---------- */
 
-const cache = new Map<string, { url: string; exp: number }>();
+/** Object URLs of images read from disk this session. */
+const cache = new Map<string, string>();
 const pending = new Map<string, Promise<string>>();
-const SIGNED_FOR = 3600;
 
 function resolveRef(ref: string): Promise<string> {
   const hit = cache.get(ref);
-  if (hit && hit.exp > Date.now()) return Promise.resolve(hit.url);
+  if (hit) return Promise.resolve(hit);
   let p = pending.get(ref);
   if (!p) {
     p = (async () => {
-      const { data, error } = await getSupabase()
-        .storage.from(BUCKET)
-        .createSignedUrl(ref.slice(IMAGE_REF.length), SIGNED_FOR);
-      if (error || !data) throw new Error(error?.message ?? "not found");
-      cache.set(ref, {
-        url: data.signedUrl,
-        exp: Date.now() + (SIGNED_FOR - 300) * 1000,
-      });
-      return data.signedUrl;
+      if (!isDesktop()) throw new Error("not available");
+      const rel = ref.slice(IMAGE_REF.length);
+      const bytes = await readAsset(rel);
+      const ext = rel.split(".").pop()?.toLowerCase() ?? "";
+      const url = URL.createObjectURL(
+        new Blob([bytes as BlobPart], { type: MIME[ext] ?? "image/webp" }),
+      );
+      cache.set(ref, url);
+      return url;
     })().finally(() => pending.delete(ref));
     pending.set(ref, p);
   }
@@ -205,9 +226,8 @@ export function useImageSrc(raw: string | undefined): string | null | undefined 
   // `#w=480` (display width) is not part of the stored path.
   const src = raw?.startsWith(IMAGE_REF) ? raw.split("#")[0] : raw;
   const isRef = !!src?.startsWith(IMAGE_REF);
-  const cached = isRef && src ? cache.get(src) : undefined;
+  const ready = isRef && src ? (cache.get(src) ?? null) : null;
   const [resolved, setResolved] = useState<{ ref: string; url: string | null }>();
-  const ready = cached && cached.exp > Date.now() ? cached.url : null;
 
   useEffect(() => {
     if (!isRef || !src || ready) return;

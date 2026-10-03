@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { getSupabase } from "./supabase";
 import { newId } from "./ids";
 
 /**
@@ -8,10 +7,9 @@ import { newId } from "./ids";
  * and never written to ~/.claude, ~/.config/devin or the workspace, so the
  * CLIs run outside CoTenk never see them.
  *
- * The list is kept per scope (this device signed out, or one account) and
- * synced to Supabase while signed in. Secret values — env vars of a
- * command server, headers of a URL server — stay on this device; only
- * their names sync, so a new device asks for them once.
+ * The list lives on this device. Secret values — env vars of a command
+ * server, headers of a URL server — are kept apart from the list, so an
+ * exported or shared list never carries them.
  */
 
 export type SkillExtension = {
@@ -149,9 +147,6 @@ export function parseMcpConfig(raw: unknown): McpImport[] {
 export const BUILTIN_SKILL = "cotenk-workspace";
 export const BUILTIN_MCP = "cotenk";
 
-/** "off" = signed out; "missing" = the Supabase migration isn't applied. */
-export type RemoteState = "off" | "syncing" | "synced" | "missing" | "error";
-
 /* ---------- helpers ---------- */
 
 /** Skill/server names: lowercase letters, digits and hyphens (≤ 64). */
@@ -238,9 +233,7 @@ export function parseSkillFile(
 
 /* ---------- local persistence ---------- */
 
-const LOCAL = "local";
-const listKey = (scope: string) => `cotenk-extensions:${scope}`;
-const syncedKey = (userId: string) => `cotenk-extensions-synced:${userId}`;
+const LIST_KEY = "cotenk-extensions:local";
 const SECRETS_KEY = "cotenk-extension-secrets";
 
 function readJson<T>(key: string): T | null {
@@ -269,12 +262,10 @@ const isExtension = (v: unknown): v is Extension =>
     (Array.isArray((v as PluginExtension).skills) &&
       Array.isArray((v as PluginExtension).servers)));
 
-function loadScope(scope: string): Extension[] {
-  const list = readJson<unknown[]>(listKey(scope));
+function loadList(): Extension[] {
+  const list = readJson<unknown[]>(LIST_KEY);
   return Array.isArray(list) ? list.filter(isExtension) : [];
 }
-
-let scope = LOCAL;
 
 /** Secret values (env vars / headers) of one MCP server, this device only. */
 export function extensionSecrets(id: string): Record<string, string> {
@@ -301,15 +292,13 @@ export function missingSecrets(e: McpExtension): string[] {
 
 type ExtensionState = {
   items: Extension[];
-  remote: RemoteState;
   add: (draft: ExtensionDraft) => Extension;
   update: (id: string, patch: Partial<ExtensionDraft>) => void;
   remove: (id: string) => void;
 };
 
 export const useExtensions = create<ExtensionState>()((set, get) => ({
-  items: loadScope(LOCAL),
-  remote: "off",
+  items: loadList(),
 
   add: (draft) => {
     const ext = { ...draft, id: newId(), updatedAt: Date.now() } as Extension;
@@ -335,269 +324,5 @@ export const useExtensions = create<ExtensionState>()((set, get) => ({
 }));
 
 useExtensions.subscribe((s, prev) => {
-  if (s.items !== prev.items) writeJson(listKey(scope), s.items);
+  if (s.items !== prev.items) writeJson(LIST_KEY, s.items);
 });
-
-/** Switches the list on screen to another scope (account or device). */
-function switchScope(next: string) {
-  if (next === scope) return;
-  scope = next;
-  let items = loadScope(next);
-  // First sign-in on this device: the device's extensions come along.
-  if (next !== LOCAL && readJson(listKey(next)) === null) {
-    items = loadScope(LOCAL);
-  }
-  useExtensions.setState({ items });
-  writeJson(listKey(next), items);
-}
-
-/* ---------- supabase sync ---------- */
-
-type Row = {
-  id: string;
-  user_id: string;
-  kind: "skill" | "mcp" | "plugin";
-  name: string;
-  enabled: boolean;
-  data: Record<string, unknown>;
-  updated_at: number | string;
-};
-
-function toRow(e: Extension, userId: string): Row {
-  const { id, kind, name, enabled, updatedAt, ...data } = e;
-  return {
-    id,
-    user_id: userId,
-    kind,
-    name,
-    enabled,
-    data,
-    updated_at: updatedAt,
-  };
-}
-
-function fromRow(r: Row): Extension | null {
-  const base = {
-    id: r.id,
-    name: r.name,
-    enabled: r.enabled,
-    updatedAt: Number(r.updated_at) || 0,
-  };
-  const d = r.data ?? {};
-  const str = (v: unknown) => (typeof v === "string" ? v : "");
-  const strs = (v: unknown) =>
-    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
-  if (r.kind === "skill") {
-    return { ...base, kind: "skill", description: str(d.description), body: str(d.body) };
-  }
-  const server = (v: unknown): PluginServer | null => {
-    if (!v || typeof v !== "object") return null;
-    const s = v as Record<string, unknown>;
-    return {
-      name: str(s.name),
-      transport: s.transport === "http" ? "http" : "stdio",
-      command: str(s.command),
-      args: strs(s.args),
-      url: str(s.url),
-      secretKeys: strs(s.secretKeys),
-    };
-  };
-  if (r.kind === "mcp") {
-    const s = server(d);
-    return s && { ...s, ...base, name: r.name, kind: "mcp" };
-  }
-  if (r.kind === "plugin") {
-    const list = (v: unknown) => (Array.isArray(v) ? v : []);
-    return {
-      ...base,
-      kind: "plugin",
-      description: str(d.description),
-      skills: list(d.skills).map((s) => ({
-        name: str(s?.name),
-        description: str(s?.description),
-        body: str(s?.body),
-      })),
-      servers: list(d.servers)
-        .map(server)
-        .filter((s): s is PluginServer => !!s),
-    };
-  }
-  return null;
-}
-
-const missingTable = (e: { code?: string; message?: string } | null) =>
-  !!e &&
-  (e.code === "42P01" ||
-    e.code === "PGRST205" ||
-    /does not exist|schema cache/i.test(e.message ?? ""));
-
-/**
- * Sync for one signed-in user. Which rows exist on the server is
- * remembered per device ("synced ids"), so a delete on either side is
- * told apart from a row that's simply new:
- *
- *  - local only + synced before → deleted on another device → dropped
- *  - local only + never synced → new here → pushed
- *  - synced + gone locally → deleted here → deleted remotely
- *  - on both → newer `updatedAt` wins
- */
-export function initExtensionSync(userId: string): () => void {
-  switchScope(userId);
-  const sb = getSupabase();
-  const synced = new Set(readJson<string[]>(syncedKey(userId)) ?? []);
-  const saveSynced = () => writeJson(syncedKey(userId), [...synced]);
-  /** Objects that match the server (extensions are immutable). */
-  const pushed = new WeakSet<Extension>();
-  let disposed = false;
-  let pulled = false;
-  let failures = 0;
-  let lastPull = 0;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let inflight: Promise<void> | null = null;
-  let dirty = false;
-  let applyingRemote = false;
-
-  const setRemote = (remote: RemoteState) => {
-    if (!disposed) useExtensions.setState({ remote });
-  };
-
-  const pushOnce = async () => {
-    const items = useExtensions.getState().items;
-    const changed = items.filter((e) => !pushed.has(e));
-    const localIds = new Set(items.map((e) => e.id));
-    const deletes = [...synced].filter((id) => !localIds.has(id));
-    if (changed.length > 0) {
-      const { error } = await sb
-        .from("agent_extensions")
-        .upsert(changed.map((e) => toRow(e, userId)));
-      if (error) throw error;
-      changed.forEach((e) => {
-        pushed.add(e);
-        synced.add(e.id);
-      });
-    }
-    if (deletes.length > 0) {
-      const { error } = await sb
-        .from("agent_extensions")
-        .delete()
-        .in("id", deletes);
-      if (error) throw error;
-      deletes.forEach((id) => synced.delete(id));
-    }
-    saveSynced();
-  };
-
-  const flush = (): Promise<void> => {
-    if (!pulled || disposed) return Promise.resolve();
-    if (inflight) {
-      dirty = true;
-      return inflight;
-    }
-    dirty = false;
-    setRemote("syncing");
-    inflight = (async () => {
-      try {
-        await pushOnce();
-        setRemote("synced");
-      } catch {
-        setRemote("error");
-        if (!disposed) timer = setTimeout(() => void flush(), 5000);
-      } finally {
-        inflight = null;
-      }
-      if (dirty && !disposed) await flush();
-    })();
-    return inflight;
-  };
-
-  const pull = async () => {
-    lastPull = Date.now();
-    setRemote("syncing");
-    const { data, error } = await sb
-      .from("agent_extensions")
-      .select("*")
-      .order("created_at");
-    if (disposed) return;
-    if (error) {
-      if (missingTable(error)) {
-        setRemote("missing"); // migration pending — stay local
-        return;
-      }
-      failures += 1;
-      setRemote("error");
-      timer = setTimeout(
-        () => void pull(),
-        Math.min(60_000, 3000 * 2 ** Math.min(failures, 5)),
-      );
-      return;
-    }
-    failures = 0;
-    const remote = ((data ?? []) as Row[])
-      .map(fromRow)
-      .filter((e): e is Extension => !!e);
-    const remoteById = new Map(remote.map((e) => [e.id, e]));
-    const local = useExtensions.getState().items;
-    const localIds = new Set(local.map((e) => e.id));
-
-    const merged: Extension[] = [];
-    for (const l of local) {
-      const r = remoteById.get(l.id);
-      if (!r) {
-        if (synced.has(l.id)) synced.delete(l.id); // deleted elsewhere
-        else merged.push(l); // new here
-        continue;
-      }
-      if (r.updatedAt > l.updatedAt) {
-        pushed.add(r);
-        merged.push(r);
-      } else {
-        if (r.updatedAt === l.updatedAt) pushed.add(l);
-        merged.push(l);
-      }
-    }
-    for (const r of remote) {
-      // On the server but not here: known before → deleted here, the
-      // push removes it; unknown → new from another device.
-      if (!localIds.has(r.id) && !synced.has(r.id)) {
-        pushed.add(r);
-        merged.push(r);
-      }
-      synced.add(r.id);
-    }
-    saveSynced();
-    applyingRemote = true;
-    try {
-      useExtensions.setState({ items: merged });
-    } finally {
-      applyingRemote = false;
-    }
-    pulled = true;
-    await flush();
-  };
-
-  const unsub = useExtensions.subscribe((s, prev) => {
-    if (s.items === prev.items || applyingRemote || !pulled) return;
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => void flush(), 800);
-  });
-
-  // Another device may have changed something — refresh on focus.
-  const onFocus = () => {
-    if (pulled && !inflight && Date.now() - lastPull > 30_000) void pull();
-  };
-  const onOnline = () => void (pulled ? flush() : pull());
-  window.addEventListener("focus", onFocus);
-  window.addEventListener("online", onOnline);
-
-  void pull();
-  return () => {
-    disposed = true;
-    unsub();
-    window.removeEventListener("focus", onFocus);
-    window.removeEventListener("online", onOnline);
-    if (timer) clearTimeout(timer);
-    // Leave the account's list behind; the device list comes back.
-    switchScope(LOCAL);
-    useExtensions.setState({ remote: "off" });
-  };
-}

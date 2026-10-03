@@ -1,24 +1,17 @@
 import { strToU8, zipSync } from "fflate";
-import { getSupabase } from "./supabase";
-import { useAuth } from "./auth-store";
 import { useWorkspace } from "./store";
 import { useAgent } from "./agent-store";
 import { saveBytes } from "./files";
-import { BUCKET } from "./images";
+import { readAsset } from "./images";
+import { isDesktop } from "./workspace";
 import type { Doc, Folder } from "./types";
 
 /**
- * Workspace export (ZIP of markdown + attachments), cleanup of stored
- * files nothing points to any more, and account deletion.
+ * Workspace export (ZIP of markdown + attachments) and wiping the data
+ * this app keeps on the device.
  */
 
 const REF_RE = /cotenk-(?:image|file):([^)\s"#]+)(?:#[^)\s"]*)?/g;
-const ONE_DAY = 24 * 60 * 60 * 1000;
-
-const signedInWorkspace = () => {
-  const { status, workspaceId } = useAuth.getState();
-  return status === "signedIn" ? workspaceId : null;
-};
 
 const slug = (s: string) =>
   s
@@ -116,17 +109,14 @@ export async function exportWorkspace(
     files[`chats/${name}.md`] = strToU8(md);
   }
 
-  const ws = signedInWorkspace();
-  if (found.size > 0 && ws) {
-    const sb = getSupabase();
+  if (found.size > 0 && isDesktop()) {
     let done = 0;
     for (const path of found) {
-      onProgress?.(`Downloading attachments (${++done}/${found.size})…`);
-      const { data } = await sb.storage.from(BUCKET).download(path);
-      if (data) {
-        files[`assets/${path.split("/").pop()}`] = new Uint8Array(
-          await data.arrayBuffer(),
-        );
+      onProgress?.(`Collecting attachments (${++done}/${found.size})…`);
+      try {
+        files[`assets/${path.split("/").pop()}`] = await readAsset(path);
+      } catch {
+        /* missing on disk — the link stays in the page */
       }
     }
   }
@@ -149,116 +139,23 @@ export async function exportWorkspace(
   return saveBytes(`cotenk-export-${stamp}.zip`, zip, "application/zip");
 }
 
-/* ---------- stored files ---------- */
-
-type Listed = { path: string; createdAt: number; size: number };
-
-async function listFolder(ws: string, kind: string): Promise<Listed[]> {
-  const sb = getSupabase();
-  const out: Listed[] = [];
-  for (let offset = 0; ; offset += 1000) {
-    const { data, error } = await sb.storage
-      .from(BUCKET)
-      .list(`${ws}/${kind}`, { limit: 1000, offset });
-    if (error) throw new Error(error.message);
-    for (const o of data ?? []) {
-      if (!o.id) continue; // a sub-folder placeholder
-      out.push({
-        path: `${ws}/${kind}/${o.name}`,
-        createdAt: new Date(o.created_at ?? 0).getTime(),
-        size: Number((o.metadata as { size?: number } | null)?.size ?? 0),
-      });
-    }
-    if (!data || data.length < 1000) break;
-  }
-  return out;
-}
-
-const listAll = async (ws: string) =>
-  (await Promise.all(["note", "chat", "file"].map((k) => listFolder(ws, k)))).flat();
-
-async function removePaths(paths: string[]) {
-  const sb = getSupabase();
-  for (let i = 0; i < paths.length; i += 100) {
-    const { error } = await sb.storage.from(BUCKET).remove(paths.slice(i, i + 100));
-    if (error) throw new Error(error.message);
-  }
-}
-
-/** Refs in what's open on this device — not yet synced edits count too. */
-function localRefs(): Set<string> {
-  const refs = new Set<string>();
-  const scan = (text: string) => {
-    for (const m of text.matchAll(REF_RE)) refs.add(m[1]);
-  };
-  useWorkspace.getState().docs.forEach((d) => scan(d.content));
-  useAgent
-    .getState()
-    .chats.forEach((c) => c.messages.forEach((m) => (m.images ?? []).forEach(scan)));
-  return refs;
-}
-
-export type UnusedFiles = { paths: string[]; bytes: number };
+/* ---------- local data ---------- */
 
 /**
- * Files nobody points to: not in a page, an older version, the recently
- * deleted pages or a chat. Younger than `graceMs` is always kept.
+ * Removes everything this app stored in the browser (pages cache, chats,
+ * history, settings) and reloads into a fresh workspace. The workspace
+ * folder on disk is left alone.
  */
-export async function findUnusedFiles(graceMs = ONE_DAY): Promise<UnusedFiles> {
-  const ws = signedInWorkspace();
-  if (!ws) return { paths: [], bytes: 0 };
-  const { data, error } = await getSupabase().rpc("referenced_note_files", { ws });
-  if (error) throw new Error(error.message);
-  const keep = new Set<string>([...((data ?? []) as string[]), ...localRefs()]);
-  const cutoff = Date.now() - graceMs;
-  const unused = (await listAll(ws)).filter(
-    (f) => !keep.has(f.path) && f.createdAt < cutoff,
-  );
-  return {
-    paths: unused.map((f) => f.path),
-    bytes: unused.reduce((n, f) => n + f.size, 0),
-  };
-}
-
-export async function removeUnusedFiles(found: UnusedFiles): Promise<void> {
-  await removePaths(found.paths);
-}
-
-const CLEANUP_KEY = (ws: string) => `cotenk-cleanup:${ws}`;
-
-/** Weekly quiet cleanup after a sync; keeps anything younger than 3 days. */
-export async function maybeAutoCleanup(): Promise<void> {
-  const ws = signedInWorkspace();
-  if (!ws) return;
+export function clearLocalData() {
   try {
-    const last = Number(localStorage.getItem(CLEANUP_KEY(ws)) ?? 0);
-    if (Date.now() - last < 7 * ONE_DAY) return;
-    localStorage.setItem(CLEANUP_KEY(ws), String(Date.now()));
-    await removeUnusedFiles(await findUnusedFiles(3 * ONE_DAY));
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k?.startsWith("cotenk")) keys.push(k);
+    }
+    keys.forEach((k) => localStorage.removeItem(k));
   } catch {
-    /* offline or migration missing — the next sync retries */
+    /* storage unavailable */
   }
-}
-
-export const formatBytes = (n: number) =>
-  n >= 1024 * 1024
-    ? `${(n / 1024 / 1024).toFixed(1)} MB`
-    : `${Math.max(1, Math.round(n / 1024))} KB`;
-
-/* ---------- account deletion ---------- */
-
-/** Deletes stored files, then the account and everything it owns. */
-export async function deleteAccount(): Promise<string | null> {
-  const ws = signedInWorkspace();
-  const sb = getSupabase();
-  try {
-    if (ws) await removePaths((await listAll(ws)).map((f) => f.path));
-  } catch (e) {
-    return e instanceof Error ? e.message : String(e);
-  }
-  const { error } = await sb.rpc("delete_account");
-  if (error) return error.message;
-  // The server session is gone with the account; drop the local one.
-  await sb.auth.signOut({ scope: "local" });
-  return null;
+  window.location.reload();
 }

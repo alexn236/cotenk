@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect } from "react";
 import { useWorkspace } from "@/lib/store";
 import { startNotifications } from "@/lib/notifications";
-import { AuthGate } from "@/components/auth/auth-gate";
+import { WorkspaceGate } from "@/components/shell/workspace-gate";
 import { IconRail } from "@/components/shell/icon-rail";
 import { Sidebar } from "@/components/shell/sidebar";
 import { CommandPalette } from "@/components/shell/command-palette";
@@ -28,17 +28,15 @@ const SettingsView = lazyView(() =>
 const AgentsView = lazyView(() =>
   import("@/components/agents/agents-view").then((m) => m.AgentsView),
 );
+const GraphView = lazyView(() =>
+  import("@/components/graph/graph-view").then((m) => m.GraphView),
+);
 const MarketView = lazyView(() =>
   import("@/components/market/market-view").then((m) => m.MarketView),
 );
 const HistoryDialog = lazy(() =>
   import("@/components/shell/history-dialog").then((m) => ({
     default: m.HistoryDialog,
-  })),
-);
-const PublishDialog = lazy(() =>
-  import("@/components/market/publish-dialog").then((m) => ({
-    default: m.PublishDialog,
   })),
 );
 
@@ -69,10 +67,6 @@ function useGlobalShortcuts() {
 
 export default function App() {
   const railSection = useWorkspace((s) => s.railSection);
-  const publishDoc = useWorkspace(
-    (s) => s.docs.find((d) => d.id === s.publishDocId) ?? null,
-  );
-  const setPublishDocId = useWorkspace((s) => s.setPublishDocId);
   const setRailSection = useWorkspace((s) => s.setRailSection);
   const historyDocId = useWorkspace((s) => s.historyDocId);
   const setHistoryDocId = useWorkspace((s) => s.setHistoryDocId);
@@ -81,7 +75,7 @@ export default function App() {
   useEffect(() => startNotifications(), []);
 
   return (
-    <AuthGate>
+    <WorkspaceGate>
       <ViewBoundary onHome={goHome}>
         <div className="flex h-dvh overflow-hidden bg-canvas text-ink">
           <IconRail />
@@ -99,6 +93,8 @@ export default function App() {
                 <AgentsView />
               ) : railSection === "market" ? (
                 <MarketView />
+              ) : railSection === "graph" ? (
+                <GraphView />
               ) : (
                 <DocEditor />
               )}
@@ -107,11 +103,6 @@ export default function App() {
         </div>
       </ViewBoundary>
       <CommandPalette />
-      {publishDoc && (
-        <Suspense fallback={null}>
-          <PublishDialog doc={publishDoc} onClose={() => setPublishDocId(null)} />
-        </Suspense>
-      )}
       {historyDocId && (
         <Suspense fallback={null}>
           <HistoryDialog
@@ -126,6 +117,6 @@ export default function App() {
       <PermissionDialog />
       <AgentSetupGuide />
       <Toaster />
-    </AuthGate>
+    </WorkspaceGate>
   );
 }

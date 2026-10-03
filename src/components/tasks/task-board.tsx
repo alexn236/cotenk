@@ -19,6 +19,7 @@ import {
   type DueBucket,
   type TaskItem,
 } from "@/lib/tasks";
+import { celebrate } from "@/lib/celebrate";
 
 type ColumnId = DueBucket | "done";
 
@@ -178,10 +179,13 @@ function Card({
             role="checkbox"
             aria-checked={task.done}
             aria-label={task.text}
-            onClick={() => toggleTask(task, !task.done)}
+            onClick={(e) => {
+              if (!task.done) celebrate(e.currentTarget);
+              toggleTask(task, !task.done);
+            }}
             className={`mt-[2px] grid h-[14px] w-[14px] shrink-0 place-items-center rounded-[4px] border-[1.5px] transition-colors duration-150 ${
               task.done
-                ? "border-accent bg-accent text-on-accent"
+                ? "task-check border-accent bg-accent text-on-accent"
                 : "border-line bg-panel hover:border-ink-3"
             }`}
           >

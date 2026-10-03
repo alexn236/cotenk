@@ -5,13 +5,13 @@ import {
   MagnifyingGlass,
   Plus,
   PushPin,
+  HardDrives,
   SidebarSimple,
-  SignIn,
-  SignOut,
 } from "@phosphor-icons/react";
 import { useState } from "react";
 import { dropDocInto, isDocDrag, useWorkspace } from "@/lib/store";
-import { requestSignIn, useAuth } from "@/lib/auth-store";
+import { invoke } from "@tauri-apps/api/core";
+import { isDesktop, resolveWorkspaceDir } from "@/lib/workspace";
 import type { Doc, Folder } from "@/lib/types";
 import { TasksNav } from "@/components/tasks/tasks-nav";
 import { SettingsNav } from "@/components/settings/settings-nav";
@@ -126,85 +126,39 @@ export function Sidebar() {
   );
 }
 
+/** Where the pages live; on desktop a click opens the workspace folder. */
 function UserFooter() {
-  const user = useAuth((s) => s.user);
-  const displayName = useAuth((s) => s.displayName);
-  const signOut = useAuth((s) => s.signOut);
-  const syncStatus = useWorkspace((s) => s.syncStatus);
-
-  if (!user) {
-    return (
-      <div className="border-t border-line-soft p-2">
-        <button
-          type="button"
-          onClick={() =>
-            requestSignIn(
-              "Sign in to open this workspace on your other devices.",
-            )
-          }
-          className="group flex w-full items-center gap-2 rounded-[6px] px-1.5 py-1 text-left transition-colors duration-150 hover:bg-hover"
-        >
-          <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-dashed border-line text-ink-3 group-hover:border-accent-line group-hover:text-accent">
-            <SignIn size={11} />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[12px] text-ink-2 group-hover:text-ink">
-              Local workspace
-            </span>
-            <span className="block truncate text-[10.5px] text-ink-3">
-              Sign in to sync
-            </span>
-          </span>
-        </button>
-      </div>
-    );
-  }
-
-  const label = displayName || user.email;
-  const initial = (label[0] ?? "?").toUpperCase();
-  const statusDot =
-    syncStatus === "synced"
-      ? "bg-emerald-500/70"
-      : syncStatus === "syncing"
-        ? "animate-pulse bg-accent"
-        : syncStatus === "error"
-          ? "bg-danger"
-          : "bg-ink-3";
-  const statusLabel =
-    syncStatus === "synced"
-      ? "Synced"
-      : syncStatus === "syncing"
-        ? "Syncing"
-        : syncStatus === "error"
-          ? "Sync error"
-          : "Local";
+  const count = useWorkspace((s) => s.docs.length);
+  const desktop = isDesktop();
+  const openFolder = async () => {
+    try {
+      await invoke("open_folder", { path: await resolveWorkspaceDir() });
+    } catch {
+      /* folder unavailable */
+    }
+  };
 
   return (
     <div className="border-t border-line-soft p-2">
-      <div className="flex items-center gap-2 px-1">
-        <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line bg-elev">
-          <span className="text-[9px] leading-none text-ink-3">{initial}</span>
-        </div>
-        <span
-          className="min-w-0 flex-1 truncate text-[12px] text-ink-2"
-          title={user.email}
-        >
-          {label}
+      <button
+        type="button"
+        disabled={!desktop}
+        onClick={() => void openFolder()}
+        title={desktop ? "Open the workspace folder" : undefined}
+        className="group flex w-full items-center gap-2 rounded-[6px] px-1.5 py-1 text-left transition-colors duration-150 enabled:hover:bg-hover"
+      >
+        <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-line text-ink-3">
+          <HardDrives size={11} />
         </span>
-        <span
-          title={statusLabel}
-          className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDot}`}
-        />
-        <button
-          type="button"
-          onClick={() => void signOut()}
-          aria-label="Sign out"
-          title="Sign out"
-          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px] text-ink-3 transition-colors duration-150 hover:bg-hover hover:text-ink-2"
-        >
-          <SignOut size={13} />
-        </button>
-      </div>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[12px] text-ink-2">
+            Local workspace
+          </span>
+          <span className="block truncate text-[10.5px] text-ink-3">
+            {count} {count === 1 ? "page" : "pages"} on this device
+          </span>
+        </span>
+      </button>
     </div>
   );
 }

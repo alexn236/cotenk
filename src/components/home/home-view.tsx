@@ -16,14 +16,14 @@ import {
 } from "@phosphor-icons/react";
 import { openWelcomePage, useWorkspace } from "@/lib/store";
 import { isHtmlPage } from "@/lib/html-page";
-import { requestSignIn, useAuth } from "@/lib/auth-store";
+import { useProfile } from "@/lib/profile";
 import { useAgent } from "@/lib/agent-store";
 import { useAgentSetup } from "@/lib/agent-setup";
 import { AGENT_KINDS } from "@/lib/agents";
 import { TEMPLATES } from "@/lib/templates";
 import { seedDocs } from "@/lib/mock-docs";
 import { WELCOME_ID } from "@/lib/welcome";
-import { hasAgentChangedPage } from "@/lib/analytics";
+import { hasAgentChangedPage } from "@/lib/activity";
 import {
   completeOnboarding,
   dismissOnboarding,
@@ -93,7 +93,7 @@ export function HomeView() {
   const setMarketTab = useWorkspace((s) => s.setMarketTab);
   const setPaletteOpen = useWorkspace((s) => s.setPaletteOpen);
   const createDoc = useWorkspace((s) => s.createDoc);
-  const name = firstName(useAuth((s) => s.displayName));
+  const name = firstName(useProfile((s) => s.name));
   const chats = useAgent((s) => s.chats);
   const selectChat = useAgent((s) => s.selectChat);
   const reduceMotion = useReducedMotion();
@@ -381,7 +381,6 @@ function QuickAction({
 function GettingStarted() {
   const docs = useWorkspace((s) => s.docs);
   const createDoc = useWorkspace((s) => s.createDoc);
-  const signedIn = useAuth((s) => s.status === "signedIn");
   const setup = useAgentSetup((s) => s.setup);
   const checkSetup = useAgentSetup((s) => s.check);
   const openGuide = useAgentSetup((s) => s.openGuide);
@@ -411,7 +410,7 @@ function GettingStarted() {
   const steps: Step[] = desktop
     ? [
         {
-          label: "Connect an agent — CoTenk Agent, Claude Code or Devin",
+          label: "Connect an agent — Claude Code or Devin CLI",
           done: agentReady,
           cta: "Set up",
           run: () => openGuide(),
@@ -439,15 +438,6 @@ function GettingStarted() {
             setGotApp(true);
             openExternal(DESKTOP_DOWNLOAD_URL);
           },
-        },
-        {
-          label: "Sign in to keep your pages on every device",
-          done: signedIn,
-          cta: "Sign in",
-          run: () =>
-            requestSignIn(
-              "Sign in to open this workspace on your other devices.",
-            ),
         },
       ];
   const doneCount = steps.filter((s) => s.done).length;

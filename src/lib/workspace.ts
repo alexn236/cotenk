@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 
 /**
- * Desktop-only settings that live outside Supabase: which local folder
- * the agent works in, and an optional API key override for auth.
+ * Desktop-only settings: which local folder the pages and agents live
+ * in, and an optional Devin API key override.
  */
 
 const DIR_KEY = "cotenk.workspace-dir";
@@ -29,30 +29,11 @@ export function openExternal(url: string) {
     window.open(url, "_blank", "noopener,noreferrer");
   }
 }
+
 const KEY_KEY = "cotenk.devin-api-key";
 
-/**
- * Whose workspace folder is active: "local" (signed out — the pages that
- * live only on this device) or an account's user id. Every scope gets
- * its own folder, so signing in or out never mixes two people's pages
- * on disk, and agents always run in the folder of whoever is signed in.
- */
-let scope = "local";
-let scopeLabel = "";
-
-/** Called by the session gate on sign-in/out. */
-export function setWorkspaceScope(next: string, label = "") {
-  scope = next;
-  scopeLabel = label;
-}
-
-export function workspaceScope(): string {
-  return scope;
-}
-
-const dirKey = (s: string) => `${DIR_KEY}:${s}`;
-/** Set once the pre-scope folder setting has been handed to its owner. */
-const MIGRATED_KEY = "cotenk.workspace-dir-migrated";
+/** Key the folder choice is stored under (scoped name kept for upgrades). */
+const SCOPED_DIR_KEY = `${DIR_KEY}:local`;
 
 function readLs(key: string): string | null {
   try {
@@ -70,32 +51,12 @@ function writeLs(key: string, value: string) {
   }
 }
 
-/** Comparison form of a folder path (separators and case folded). */
-const samePathKey = (p: string) => p.replace(/\\/g, "/").toLowerCase();
-
-/** Folders already claimed by some scope on this device. */
-function claimedDirs(): Set<string> {
-  const out = new Set<string>();
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k?.startsWith(`${DIR_KEY}:`)) {
-        const v = localStorage.getItem(k);
-        if (v) out.add(samePathKey(v));
-      }
-    }
-  } catch {
-    /* storage unavailable */
-  }
-  return out;
-}
-
 export function storedWorkspaceDir(): string | null {
-  return readLs(dirKey(scope));
+  return readLs(SCOPED_DIR_KEY) ?? readLs(DIR_KEY);
 }
 
 export function storeWorkspaceDir(dir: string) {
-  writeLs(dirKey(scope), dir);
+  writeLs(SCOPED_DIR_KEY, dir);
 }
 
 export function apiKeyOverride(): string | null {
@@ -126,34 +87,13 @@ export function devinStatus(): Promise<DevinStatus> {
 }
 
 /**
- * Folder of the active scope. First use picks (and remembers) a default:
- *
- *  - Whoever uses the app first after this update inherits the folder
- *    the app used before (the chosen one, else ~/Documents/CoTenk) —
- *    that's where their pages already are.
- *  - Otherwise signed out uses ~/Documents/CoTenk and an account uses
- *    "~/Documents/CoTenk (name)", never a folder another scope owns.
+ * The workspace folder: the one picked in Settings → Agents, else
+ * ~/Documents/CoTenk (remembered on first use).
  */
 export async function resolveWorkspaceDir(): Promise<string> {
-  const own = readLs(dirKey(scope));
+  const own = storedWorkspaceDir();
   if (own) return own;
-  const base = await invoke<string>("workspace_dir");
-  let dir: string;
-  if (!readLs(MIGRATED_KEY)) {
-    dir = readLs(DIR_KEY) ?? base;
-  } else {
-    const taken = claimedDirs();
-    const free = (p: string) => !taken.has(samePathKey(p));
-    const label =
-      scope === "local"
-        ? "Local"
-        : scopeLabel.replace(/[^\p{L}\p{N}._-]+/gu, "-").slice(0, 40) ||
-          scope.slice(0, 8);
-    const first = scope === "local" ? base : `${base} (${label})`;
-    dir = first;
-    for (let i = 2; !free(dir); i++) dir = `${base} (${label} ${i})`;
-  }
-  writeLs(MIGRATED_KEY, "1");
-  writeLs(dirKey(scope), dir);
+  const dir = await invoke<string>("workspace_dir");
+  writeLs(SCOPED_DIR_KEY, dir);
   return dir;
 }

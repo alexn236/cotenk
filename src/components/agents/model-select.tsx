@@ -12,7 +12,6 @@ import { AgentSwitch, SetupDot } from "./agent-switch";
 /** Devin shows published prices in the picker; Claude bills via the plan. */
 const NOTE: Partial<Record<AgentKind, string>> = {
   claude: "billed through your claude plan or api key",
-  cotenk: "billed by your provider through your own api key",
 };
 
 /**

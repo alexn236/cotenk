@@ -10,6 +10,7 @@ import { useWorkspace } from "@/lib/store";
 import { delegateTask, toggleTask } from "@/lib/task-actions";
 import { isAgentName, type TaskItem } from "@/lib/tasks";
 import { TaskSchedule } from "./task-schedule";
+import { celebrate } from "@/lib/celebrate";
 
 const CHIP =
   "inline-flex h-[18px] items-center gap-1 rounded-full border px-1.5 text-[10.5px] leading-none";
@@ -49,10 +50,13 @@ export function TaskRow({
         role="checkbox"
         aria-checked={task.done}
         aria-label={task.text}
-        onClick={() => toggleTask(task, !task.done)}
+        onClick={(e) => {
+          if (!task.done) celebrate(e.currentTarget);
+          toggleTask(task, !task.done);
+        }}
         className={`mt-[3px] grid h-[15px] w-[15px] shrink-0 place-items-center rounded-[4px] border-[1.5px] transition-colors duration-150 ${
           task.done
-            ? "border-accent bg-accent text-on-accent"
+            ? "task-check border-accent bg-accent text-on-accent"
             : "border-line bg-panel-2 hover:border-ink-3"
         }`}
       >

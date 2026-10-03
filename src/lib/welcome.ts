@@ -4,8 +4,8 @@ import { stripEmbedState } from "./embed-state";
 
 /**
  * Welcome-page versioning. The welcome page is a normal doc, so once it
- * reached an account it stays frozen there. Each version gets its own id
- * (`d-welcome-v2`, …); an account that still holds an older version *in
+ * is in a workspace it stays frozen there. Each version gets its own id
+ * (`d-welcome-v2`, …); a workspace that still holds an older version *in
  * its original form* gets it swapped for the current one. Edited copies
  * belong to the user and are left alone.
  *

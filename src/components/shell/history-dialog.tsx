@@ -3,10 +3,8 @@ import { Modal } from "@/components/ui/modal";
 import { Markdown } from "@/components/editor/markdown";
 import { btn } from "@/components/ui/styles";
 import { useWorkspace } from "@/lib/store";
-import { requestSignIn, useAuth } from "@/lib/auth-store";
 import { toast } from "@/lib/toast";
 import {
-  historyAvailable,
   listTrash,
   listVersions,
   purgeVersion,
@@ -25,7 +23,7 @@ const when = (ms: number) =>
 
 /**
  * Version history of the open page, or — for `docId === "trash"` — the
- * pages deleted in the past 60 days. Both come from the database trigger.
+ * pages deleted in the past 60 days. Both are kept on this device.
  */
 export function HistoryDialog({
   docId,
@@ -35,7 +33,6 @@ export function HistoryDialog({
   onClose: () => void;
 }) {
   const trash = docId === "trash";
-  const signedIn = useAuth((s) => s.status === "signedIn");
   const doc = useWorkspace((s) => s.docs.find((d) => d.id === docId) ?? null);
   const [versions, setVersions] = useState<Version[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +40,6 @@ export function HistoryDialog({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!historyAvailable()) return;
     let live = true;
     (trash ? listTrash() : listVersions(docId))
       .then((v) => {
@@ -105,24 +101,7 @@ export function HistoryDialog({
           : `Version history — ${doc?.title.trim() || "Untitled"}`
       }
     >
-      {!signedIn ? (
-        <div className="flex flex-col items-start gap-3 p-6 text-[13px] text-ink-2">
-          <p>
-            Version history and deleted pages are kept in your account, so
-            they survive sync problems on any device.
-          </p>
-          <button
-            type="button"
-            className={btn.primary}
-            onClick={() => {
-              onClose();
-              requestSignIn("Sign in to keep a version history of your pages.");
-            }}
-          >
-            Sign in
-          </button>
-        </div>
-      ) : error ? (
+      {error ? (
         <p className="p-6 text-[13px] text-danger">{error}</p>
       ) : versions === null ? (
         <p className="p-6 text-[13px] text-ink-3">Loading…</p>

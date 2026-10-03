@@ -1,12 +1,10 @@
 import { motion } from "motion/react";
 import {
   Archive,
-  CloudArrowUp,
   Info,
   Lightning,
   PuzzlePiece,
   SunDim,
-  UserCircle,
   type Icon,
 } from "@phosphor-icons/react";
 import { useWorkspace, type SettingsSection } from "@/lib/store";
@@ -19,8 +17,6 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   { id: "appearance", label: "Appearance", Icon: SunDim },
-  { id: "account", label: "Account", Icon: UserCircle },
-  { id: "sync", label: "Sync", Icon: CloudArrowUp },
   { id: "agents", label: "Agents", Icon: Lightning },
   { id: "extensions", label: "Agent customisation", Icon: PuzzlePiece },
   { id: "data", label: "Data & backup", Icon: Archive },

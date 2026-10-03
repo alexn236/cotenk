@@ -16,7 +16,6 @@ import {
   isDesktop,
   openExternal,
 } from "@/lib/workspace";
-import { CotenkKeyForm } from "./cotenk-key-form";
 
 const NODE_URL = "https://nodejs.org/en/download";
 
@@ -74,8 +73,8 @@ function Step({
 }
 
 /**
- * Guided agent setup: pick an agent, then Node.js → install → sign in
- * (or an API key for the CoTenk Agent), each step with its own button
+ * Guided agent setup: pick an agent, then Node.js → install → sign in,
+ * each step with its own button
  * and a live check. Replaces "run these npm commands in a terminal" from
  * the README — the terminal still opens (people should see what runs),
  * but CoTenk drives it.
@@ -134,9 +133,6 @@ function GuideBody({ onClose }: { onClose: () => void }) {
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/80" />
             )}
             {AGENTS[k].name}
-            {k === "cotenk" && (
-              <span className="text-[11px] text-ink-3">built in</span>
-            )}
           </button>
         ))}
       </div>
@@ -167,13 +163,9 @@ function GuideBody({ onClose }: { onClose: () => void }) {
 
 /** What the agent is and how far it reaches, in one paragraph. */
 export function AgentIntro({ kind }: { kind: AgentKind }) {
-  const what =
-    kind === "cotenk"
-      ? "CoTenk's own agent, built on the open-source OpenCode. Bring an API key from Anthropic, OpenAI, OpenRouter, Google, DeepSeek or Mistral; it uses the skills and MCP servers you add under Settings → Agent customisation."
-      : `${AGENTS[kind].blurb}.`;
   return (
     <p className="text-[12.5px] leading-relaxed text-ink-3">
-      {what} It runs on your machine, starts in your workspace folder, and
+      {AGENTS[kind].blurb}. It runs on your machine, starts in your workspace folder, and
       asks before it changes a page. Anything outside that folder needs
       your approval, every time.
     </p>
@@ -181,8 +173,8 @@ export function AgentIntro({ kind }: { kind: AgentKind }) {
 }
 
 /**
- * The setup steps of one agent — Node.js → install → sign in, or an API
- * key for the CoTenk Agent — each with its own button and a live check.
+ * The setup steps of one agent — Node.js → install → sign in — each
+ * with its own button and a live check.
  */
 export function AgentSteps({ kind }: { kind: AgentKind }) {
   const s = useAgentSetup((st) => st.setup[kind]);
@@ -242,14 +234,10 @@ export function AgentSteps({ kind }: { kind: AgentKind }) {
     });
   }
   steps.push({
-    title: kind === "cotenk" ? "Agent engine (OpenCode)" : `Install ${info.name}`,
+    title: `Install ${info.name}`,
     done: installed,
     desc: installed
-      ? kind === "cotenk"
-        ? (s?.detail.includes("npx")
-            ? "Ready. OpenCode is fetched through npx the first time the agent starts."
-            : "OpenCode is installed.")
-        : (s?.detail ?? "Installed.")
+      ? (s?.detail ?? "Installed.")
       : installing === kind
         ? "Installing in the terminal window — this takes a minute. This step ticks itself off when it's done."
         : viaNpm
@@ -274,36 +262,25 @@ export function AgentSteps({ kind }: { kind: AgentKind }) {
       </button>
     ),
   });
-  if (kind === "cotenk") {
-    steps.push({
-      title: "Add an API key",
-      done: authed,
-      desc: authed
-        ? (s?.detail.split(" · ")[0] ?? "Key saved.")
-        : "Pick your provider and paste a key. It stays on this device and only goes to that provider.",
-      actions: <CotenkKeyForm />,
-    });
-  } else {
-    steps.push({
-      title: "Sign in",
-      done: authed,
-      desc: authed
-        ? "Signed in."
-        : connecting === kind
-          ? "Finish the sign-in in the window that opened — this step ticks itself off."
-          : `${info.name} signs in with its own account. Your login never passes through CoTenk.`,
-      actions: (
-        <button
-          type="button"
-          disabled={!!connecting}
-          onClick={() => void connect(kind)}
-          className={btn.primary}
-        >
-          {connecting === kind ? "Waiting for sign-in…" : "Sign in"}
-        </button>
-      ),
-    });
-  }
+  steps.push({
+    title: "Sign in",
+    done: authed,
+    desc: authed
+      ? "Signed in."
+      : connecting === kind
+        ? "Finish the sign-in in the window that opened — this step ticks itself off."
+        : `${info.name} signs in with its own account. Your login never passes through CoTenk.`,
+    actions: (
+      <button
+        type="button"
+        disabled={!!connecting}
+        onClick={() => void connect(kind)}
+        className={btn.primary}
+      >
+        {connecting === kind ? "Waiting for sign-in…" : "Sign in"}
+      </button>
+    ),
+  });
   const firstOpen = steps.findIndex((x) => !x.done);
 
   return (

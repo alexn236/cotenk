@@ -4,20 +4,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { CheckCircle, FolderOpen, Key, Lightning } from "@phosphor-icons/react";
 import { useWorkspace } from "@/lib/store";
-import { requestSignIn, useAuth } from "@/lib/auth-store";
+import { useProfile } from "@/lib/profile";
 import { toast } from "@/lib/toast";
 import { notificationsEnabled, setNotificationsEnabled } from "@/lib/notifications";
 import { useAgent } from "@/lib/agent-store";
 import { useAgentSetup } from "@/lib/agent-setup";
 import { usePermissions } from "@/lib/agent-permissions";
-import {
-  analyticsAvailable,
-  analyticsEnabled,
-  setAnalyticsEnabled,
-} from "@/lib/analytics";
 import { acpClient, killAllAgents } from "@/lib/agent/acp-client";
 import { AGENT_KINDS, AGENTS, type AgentKind } from "@/lib/agents";
-import { CotenkKeyForm } from "@/components/agents/cotenk-key-form";
 import {
   apiKeyOverride,
   DESKTOP_ONLY_MESSAGE,
@@ -45,7 +39,7 @@ function AppearanceSection() {
     <section>
       <SectionTitle title="Appearance" />
       <ThemePicker />
-      <p className="mt-3 text-[11.5px] text-ink-3">Synced to this device</p>
+      <p className="mt-3 text-[11.5px] text-ink-3">Saved on this device</p>
       <NotificationsCard />
     </section>
   );
@@ -59,7 +53,7 @@ function NotificationsCard() {
       <Card>
         <Row
           label="Task reminders and mentions"
-          desc="A daily summary of your tasks due today or overdue, and a note when a task with your @name appears — from an agent, another device or a teammate."
+          desc="A daily summary of your tasks due today or overdue, and a note when a task with your @name appears — for example from an agent."
         >
           <Switch
             on={on}
@@ -70,137 +64,31 @@ function NotificationsCard() {
             }}
           />
         </Row>
+        <NameRow />
       </Card>
     </div>
   );
 }
 
-/* ---------- account ---------- */
-
-function AccountSection() {
-  const user = useAuth((s) => s.user);
-  const signOut = useAuth((s) => s.signOut);
-  const displayName = useAuth((s) => s.displayName);
-  const accountStatus = useAuth((s) => s.accountStatus);
-  const openAuthDialog = useAuth((s) => s.openDialog);
-  const docs = useWorkspace((s) => s.docs.length);
-  const email = user?.email ?? "";
-  const initial = ((displayName || email)[0] ?? "?").toUpperCase();
-
-  if (!user) {
-    return (
-      <section>
-        <SectionTitle
-          title="Account"
-          sub="You're working locally. Everything works — pages, tasks, agents — the account only adds sync and the marketplace."
-        />
-        <Card>
-          <Row
-            label="Local workspace"
-            desc={`${docs} ${docs === 1 ? "page" : "pages"} on this device${
-              isDesktop() ? " and in its workspace folder" : ""
-            }.`}
-          >
-            <Badge>Not signed in</Badge>
-          </Row>
-          <Row
-            label="Sign in or create an account"
-            desc="The account has its own workspace. After signing in you choose which of these pages come along."
-          >
-            <button
-              type="button"
-              onClick={() =>
-                requestSignIn(
-                  "Sign in to open this workspace on your other devices.",
-                )
-              }
-              className="h-7 shrink-0 rounded-[6px] bg-accent px-2.5 text-[12px] font-medium text-on-accent transition-[filter,transform] duration-150 hover:brightness-110 active:scale-[0.98]"
-            >
-              Sign in
-            </button>
-          </Row>
-        </Card>
-      </section>
-    );
-  }
-
-  return (
-    <section>
-      <SectionTitle title="Account" />
-      <Card>
-        <div className="flex items-center justify-between gap-4 px-4 py-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line bg-elev">
-              <span className="text-[13px] font-medium leading-none text-ink-2">
-                {initial}
-              </span>
-            </div>
-            <div className="min-w-0">
-              <div className="truncate text-[13px] text-ink">
-                {displayName || email}
-              </div>
-              <div className="truncate text-[12px] text-ink-3">{email}</div>
-            </div>
-          </div>
-          <Badge>Signed in</Badge>
-        </div>
-        {accountStatus === "ready" && <DisplayNameRow />}
-        <Row label="Password" desc="Set a new password for this account.">
-          <SmallButton onClick={() => openAuthDialog(undefined, "recovery")}>
-            Change…
-          </SmallButton>
-        </Row>
-        <Row
-          label="Sign out"
-          desc={
-            isDesktop()
-              ? "Stops syncing and returns to the sign-in screen. The account's folder stays on disk."
-              : "Returns to the sign-in screen. Your pages stay in your account."
-          }
-        >
-          <button
-            type="button"
-            onClick={() => void signOut()}
-            className="h-7 shrink-0 rounded-[6px] border border-line bg-panel-2 px-2.5 text-[12px] text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink active:scale-[0.98]"
-          >
-            Sign out
-          </button>
-        </Row>
-      </Card>
-    </section>
-  );
-}
-
-/** Name other people see — marketplace listings, shared workspaces. */
-function DisplayNameRow() {
-  const displayName = useAuth((s) => s.displayName);
-  const setDisplayName = useAuth((s) => s.setDisplayName);
-  const [draft, setDraft] = useState(displayName);
-  const [busy, setBusy] = useState(false);
-  const dirty = draft.trim() !== displayName;
-
-  const save = async () => {
-    if (!dirty || busy) return;
-    setBusy(true);
-    const err = await setDisplayName(draft);
-    setBusy(false);
-    toast(err ?? "Name saved", err ? { tone: "error" } : undefined);
-  };
+/** Who "me" is for reminders, and the greeting on Home. */
+function NameRow() {
+  const name = useProfile((s) => s.name);
+  const setName = useProfile((s) => s.setName);
+  const [draft, setDraft] = useState(name);
+  const dirty = draft.trim() !== name;
 
   return (
     <Row
-      label="Display name"
-      desc={
-        displayName
-          ? "Shown on your marketplace listings and to people you share a workspace with."
-          : "Not set yet — needed before you publish to the marketplace."
-      }
+      label="Your name"
+      desc="Tasks with this @name count as yours. Also used for the greeting on Home."
     >
       <form
         className="flex items-center gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          void save();
+          if (!dirty) return;
+          setName(draft);
+          toast("Name saved");
         }}
       >
         <input
@@ -213,98 +101,13 @@ function DisplayNameRow() {
         {dirty && (
           <button
             type="submit"
-            disabled={busy}
-            className="shrink-0 rounded-[7px] bg-accent px-2.5 py-1 text-[12px] font-medium text-on-accent transition-colors hover:opacity-90 disabled:opacity-60"
+            className="shrink-0 rounded-[7px] bg-accent px-2.5 py-1 text-[12px] font-medium text-on-accent transition-colors hover:opacity-90"
           >
-            {busy ? "Saving…" : "Save"}
+            Save
           </button>
         )}
       </form>
     </Row>
-  );
-}
-
-/* ---------- sync ---------- */
-
-function SyncSection() {
-  const docs = useWorkspace((s) => s.docs);
-  const folders = useWorkspace((s) => s.folders);
-  const syncStatus = useWorkspace((s) => s.syncStatus);
-  const signedIn = useAuth((s) => s.status === "signedIn");
-  const accountError = useAuth((s) => s.accountError);
-  const loadAccount = useAuth((s) => s.loadAccount);
-
-  const statusDot = !signedIn
-    ? "bg-ink-3"
-    : syncStatus === "synced"
-      ? "bg-emerald-500/70"
-      : syncStatus === "syncing"
-        ? "animate-pulse bg-accent"
-        : syncStatus === "error"
-          ? "bg-danger"
-          : "bg-ink-3";
-  const statusLabel = !signedIn
-    ? "Local only"
-    : syncStatus === "synced"
-      ? "Synced"
-      : syncStatus === "syncing"
-        ? "Syncing"
-        : syncStatus === "error"
-          ? "Sync error"
-          : "Idle";
-
-  return (
-    <section>
-      <SectionTitle title="Sync" />
-      <Card>
-        <Row label="Status">
-          <span className="flex items-center gap-1.5 text-[12px] text-ink-2">
-            <span className={`h-1.5 w-1.5 rounded-full ${statusDot}`} />
-            {statusLabel}
-          </span>
-        </Row>
-        <Row label="Provider">
-          <span className="text-[12px] text-ink-2">
-            {signedIn ? "Supabase" : "This device"}
-          </span>
-        </Row>
-        <Row label="Documents">
-          <span className="font-mono text-[12px] text-ink-2">
-            {docs.length} docs · {folders.length} folders
-          </span>
-        </Row>
-      </Card>
-      {signedIn && accountError ? (
-        <div className="mt-3 flex items-center justify-between gap-3 rounded-[10px] border border-line bg-panel px-4 py-3 text-[12px] text-danger">
-          <span className="min-w-0">{accountError}</span>
-          <SmallButton onClick={() => void loadAccount()}>Retry</SmallButton>
-        </div>
-      ) : signedIn ? (
-        <div className="mt-3 rounded-[10px] border border-dashed border-line bg-transparent px-4 py-3 text-[12px] text-ink-3">
-          Every change debounces into Supabase and shows up live on your
-          other signed-in devices.
-        </div>
-      ) : (
-        <div className="mt-3 flex flex-col items-start gap-3 rounded-[10px] border border-dashed border-line bg-transparent px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-[12px] text-ink-3">
-            Pages are kept on this device
-            {isDesktop() ? " and mirrored to its workspace folder" : ""}.
-            Sign in to reach them from other devices.
-          </p>
-          <button
-            type="button"
-            onClick={() =>
-              requestSignIn(
-                "Sign in to open this workspace on your other devices.",
-              )
-            }
-            className="h-7 shrink-0 rounded-[6px] border border-line bg-panel-2 px-2.5 text-[12px] text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink active:scale-[0.98]"
-          >
-            Sign in
-          </button>
-        </div>
-      )}
-    </section>
   );
 }
 
@@ -349,9 +152,7 @@ function AgentCard({ kind }: { kind: AgentKind }) {
         desc={setup ? setup.detail : "Checking…"}
       >
         <div className="flex items-center gap-2">
-          {kind === "cotenk" && setup?.installed && !setup.authed ? (
-            <Badge>Needs API key</Badge>
-          ) : setup?.installed && !setup.authed ? (
+          {setup?.installed && !setup.authed ? (
             <SmallButton accent onClick={() => void connect(kind)}>
               {connecting === kind ? "Waiting for sign-in…" : "Connect"}
             </SmallButton>
@@ -377,12 +178,7 @@ function AgentCard({ kind }: { kind: AgentKind }) {
           )}
         </div>
       </Row>
-      {kind === "cotenk" && setup?.installed && (
-        <div className="px-4 py-3">
-          <CotenkKeyForm />
-        </div>
-      )}
-      {setup?.hint && !(kind === "cotenk" && setup.installed) && (
+      {setup?.hint && (
         <div className="px-4 py-2.5 text-[12px] leading-relaxed text-ink-3">
           {setup.hint}{" "}
           <button
@@ -426,7 +222,6 @@ function AgentCard({ kind }: { kind: AgentKind }) {
 
 function AgentsSection() {
   const chats = useAgent((s) => s.chats);
-  const signedIn = useAuth((s) => s.status === "signedIn");
   const [dir, setDir] = useState<string | null>(null);
 
   useEffect(() => {
@@ -465,11 +260,7 @@ function AgentsSection() {
             label="Workspace folder"
             desc={
               dir
-                ? `${dir} — agents read and write here. ${
-                    signedIn
-                      ? "Each account has its own folder on this device."
-                      : "Used while signed out; accounts get their own folder."
-                  }`
+                ? `${dir} — your pages live here as .md files; agents read and write them.`
                 : "Resolving…"
             }
           >
@@ -494,9 +285,10 @@ function AgentsSection() {
         </Card>
       </div>
       <p className="mt-3 font-mono text-[11px] leading-relaxed text-ink-3">
-        docs sync into this folder as .md files · agents edit them on disk
-        and changes flow back to supabase · reads never need approval ·
-        skills and MCP servers come from settings → skills & mcp
+        pages are mirrored into this folder as .md files · agents edit them
+        on disk and changes flow straight back into the app · reads never
+        need approval · skills and MCP servers come from settings → agent
+        customisation
       </p>
     </section>
   );
@@ -566,8 +358,7 @@ function AgentsWebNotice() {
         sub="Claude Code and Devin CLI run locally and start in your workspace folder."
       />
       <div className="rounded-[10px] border border-dashed border-line px-4 py-4 text-[12.5px] leading-relaxed text-ink-3">
-        {DESKTOP_ONLY_MESSAGE} Your pages and tasks stay in sync between the
-        web and the desktop app.
+        {DESKTOP_ONLY_MESSAGE}
       </div>
     </section>
   );
@@ -589,7 +380,10 @@ function AboutSection() {
       </div>
       <div className="mt-3 font-mono text-[11px] text-ink-3">v0.1.0</div>
 
-      {analyticsAvailable() && <PrivacyCard />}
+      <p className="mt-4 max-w-[420px] text-[12px] leading-relaxed text-ink-3">
+        Open source. Everything — pages, chats, settings — stays on this
+        device. Agents talk only to their own model provider.
+      </p>
 
       <div className="mt-10 w-full max-w-[420px] text-left">
         <SectionTitle title="Keyboard shortcuts" />
@@ -602,29 +396,6 @@ function AboutSection() {
         </Card>
       </div>
     </section>
-  );
-}
-
-function PrivacyCard() {
-  const [on, setOn] = useState(analyticsEnabled);
-  return (
-    <div className="mt-10 w-full max-w-[420px] text-left">
-      <SectionTitle title="Privacy" />
-      <Card>
-        <Row
-          label="Share anonymous usage data"
-          desc="Counts like “an agent changed a page in the first session” — never page content, titles or emails. Helps us see whether onboarding works."
-        >
-          <Switch
-            on={on}
-            onChange={(next) => {
-              setAnalyticsEnabled(next);
-              setOn(next);
-            }}
-          />
-        </Row>
-      </Card>
-    </div>
   );
 }
 
@@ -662,8 +433,6 @@ export function SettingsView() {
               }}
             >
               {section === "appearance" && <AppearanceSection />}
-              {section === "account" && <AccountSection />}
-              {section === "sync" && <SyncSection />}
               {section === "agents" &&
                 (isDesktop() ? <AgentsSection /> : <AgentsWebNotice />)}
               {section === "extensions" && <ExtensionsSection />}

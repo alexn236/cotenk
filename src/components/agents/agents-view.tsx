@@ -96,8 +96,8 @@ function formatK(n: number): string {
 
 /**
  * Agents view — chat surface wired to the local ACP agents (Devin CLI,
- * Claude Code) via the Tauri backend. Chats persist to Supabase and can
- * be pinned or filed under projects from the header bar.
+ * Claude Code) via the Tauri backend. Chats are saved on this device and
+ * can be pinned or filed under projects from the header bar.
  */
 export function AgentsView() {
   const status = useAgent((s) => s.status);
@@ -407,8 +407,8 @@ export function AgentsView() {
               </div>
               {!desktop ? (
                 <p className="max-w-[380px] rounded-[10px] border border-dashed border-line px-4 py-3 text-[12.5px] leading-relaxed text-ink-3">
-                  {DESKTOP_ONLY_MESSAGE} Pages, tasks and the marketplace
-                  work everywhere.
+                  {DESKTOP_ONLY_MESSAGE} Pages, tasks and templates work
+                  everywhere.
                 </p>
               ) : (
                 <div className="flex w-full max-w-[360px] flex-col items-center gap-2">

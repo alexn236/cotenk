@@ -1,6 +1,5 @@
 import { useWorkspace } from "./store";
 import { toast } from "./toast";
-import { track } from "./analytics";
 import { askAgent } from "./agent-actions";
 import { isDesktop } from "./workspace";
 import { buildImport, filesFromDrop, filesFromList, type RawFile } from "./importer";
@@ -37,13 +36,6 @@ export function runImport(files: RawFile[]): number {
     railSection: "docs",
     importOpen: false,
   }));
-  track("import_completed", {
-    source: plan.source,
-    pages: plan.docs.length,
-    folders: plan.folders.length,
-    skipped: plan.skipped,
-    duplicates: plan.duplicates,
-  });
 
   const n = plan.docs.length;
   const from = SOURCE_LABEL[plan.source];

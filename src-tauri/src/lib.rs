@@ -1,15 +1,14 @@
 //! CoTenk desktop backend.
 //!
 //! Owns the local ACP agent subprocesses (newline-delimited JSON-RPC over
-//! stdio) — one per agent kind (`devin acp`, the Claude Code ACP adapter
-//! and `opencode acp`, which powers the built-in CoTenk Agent) — and
-//! exposes them to the webview via commands + events:
+//! stdio) — one per agent kind (`devin acp` and the Claude Code ACP
+//! adapter) — and exposes them to the webview via commands + events:
 //!
 //!   commands: acp_spawn / acp_write / acp_kill / devin_api_key /
 //!             devin_status / devin_login / claude_status / claude_login /
-//!             cotenk_status / node_status / agent_install / workspace_dir /
-//!             extensions_paths / fs_read /
-//!             fs_write / fs_remove / fs_list_md / fs_watch / fs_unwatch /
+//!             node_status / agent_install / workspace_dir /
+//!             extensions_paths / fs_read / fs_read_b64 / fs_write /
+//!             fs_write_b64 / fs_remove / fs_list_md / fs_watch / fs_unwatch /
 //!             open_folder / open_url
 //!   events:   "acp:line" ({agent, line} per stdout line),
 //!             "acp:exit" (id of the agent whose process ended),
@@ -44,7 +43,7 @@ struct AcpProcess {
 
 struct WatchState(Mutex<Option<notify::RecommendedWatcher>>);
 
-/// agent id ("devin" | "claude" | "cotenk") → its process
+/// agent id ("devin" | "claude") → its process
 #[derive(Default)]
 struct AcpState(Mutex<HashMap<String, AcpProcess>>);
 
@@ -69,10 +68,6 @@ fn devin_bin() -> String {
 /// npm package of the Claude Code ACP adapter (formerly
 /// `@zed-industries/claude-code-acp`).
 const CLAUDE_ACP_PACKAGE: &str = "@agentclientprotocol/claude-agent-acp";
-
-/// npm package of OpenCode, the open-source agent behind the built-in
-/// CoTenk Agent (bring your own API key).
-const OPENCODE_PACKAGE: &str = "opencode-ai";
 
 /// `Command::new` doesn't consult PATHEXT on Windows, so npm's `.cmd`
 /// shims (claude, npx, claude-agent-acp) have to be named explicitly.
@@ -141,19 +136,6 @@ fn agent_launchers(agent: &str) -> Result<Vec<(String, Vec<String>)>, String> {
             }
             Ok(out)
         }
-        "cotenk" => {
-            let mut out = Vec::new();
-            if let Ok(bin) = std::env::var("OPENCODE_BIN") {
-                out.push((bin, vec!["acp".into()]));
-            }
-            for b in bin_candidates("opencode") {
-                out.push((b, vec!["acp".into()]));
-            }
-            for b in bin_candidates("npx") {
-                out.push((b, vec!["-y".into(), OPENCODE_PACKAGE.into(), "acp".into()]));
-            }
-            Ok(out)
-        }
         other => Err(format!("unknown agent `{other}`")),
     }
 }
@@ -161,7 +143,6 @@ fn agent_launchers(agent: &str) -> Result<Vec<(String, Vec<String>)>, String> {
 fn agent_label(agent: &str) -> &'static str {
     match agent {
         "claude" => "Claude Code",
-        "cotenk" => "CoTenk Agent",
         _ => "Devin CLI",
     }
 }
@@ -441,28 +422,6 @@ async fn claude_status() -> ClaudeStatus {
     }
 }
 
-#[derive(Serialize)]
-struct CotenkStatus {
-    /// `opencode --version` output — OpenCode is installed.
-    version: Option<String>,
-    /// npx is available, so OpenCode can be fetched on first use.
-    npx: bool,
-}
-
-/// The CoTenk Agent runs on OpenCode; its API key lives in CoTenk, so
-/// "signed in" is decided by the frontend.
-#[tauri::command]
-async fn cotenk_status() -> CotenkStatus {
-    let mut bins = Vec::new();
-    if let Ok(b) = std::env::var("OPENCODE_BIN") {
-        bins.push(b);
-    }
-    bins.extend(bin_candidates("opencode"));
-    let version = run_first(&bins, &["--version"]).filter(|s| !s.is_empty());
-    let npx = version.is_some() || run_first(&bin_candidates("npx"), &["--version"]).is_some();
-    CotenkStatus { version, npx }
-}
-
 /// Opens a terminal window running `line` — CLI sign-ins are interactive
 /// (browser + optional code paste), so they need a console.
 fn open_terminal(title: &str, line: &str) -> Result<(), String> {
@@ -514,8 +473,8 @@ struct NodeStatus {
     npm: bool,
 }
 
-/// Node.js/npm check for the setup guide (Claude Code and OpenCode
-/// install through npm).
+/// Node.js/npm check for the setup guide (Claude Code installs through
+/// npm).
 #[tauri::command]
 async fn node_status() -> NodeStatus {
     let node = run_first(&bin_candidates("node"), &["--version"]).filter(|s| !s.is_empty());
@@ -530,7 +489,6 @@ async fn node_status() -> NodeStatus {
 fn agent_install(agent: String) -> Result<(), String> {
     let line = match agent.as_str() {
         "claude" => format!("npm install -g @anthropic-ai/claude-code {CLAUDE_ACP_PACKAGE}"),
-        "cotenk" => format!("npm install -g {OPENCODE_PACKAGE}"),
         other => return Err(format!("{} can't be installed from here", agent_label(other))),
     };
     open_terminal(&format!("Install {}", agent_label(&agent)), &line)
@@ -541,6 +499,14 @@ fn agent_install(agent: String) -> Result<(), String> {
 #[tauri::command]
 fn fs_read(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("read {path}: {e}"))
+}
+
+/// Reads binary data as base64 — images and files stored in the workspace.
+#[tauri::command]
+fn fs_read_b64(path: String) -> Result<String, String> {
+    use base64::Engine;
+    let bytes = std::fs::read(&path).map_err(|e| format!("read {path}: {e}"))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
 #[tauri::command]
@@ -740,12 +706,12 @@ pub fn run() {
             devin_login,
             claude_status,
             claude_login,
-            cotenk_status,
             node_status,
             agent_install,
             workspace_dir,
             extensions_paths,
             fs_read,
+            fs_read_b64,
             fs_write,
             fs_write_b64,
             fs_remove,

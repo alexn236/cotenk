@@ -3,6 +3,8 @@ name = "cotenk"
 version = "0.1.0"
 description = "CoTenk — an open workspace for people and AI agents"
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/alexn236/cotenk"
 rust-version = "1.77"
 
 [lib]

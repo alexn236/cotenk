@@ -1,12 +1,12 @@
 import { useWorkspace } from "./store";
-import { useAuth } from "./auth-store";
+import { useProfile } from "./profile";
 import { extractTasks, isoDay, type TaskItem } from "./tasks";
 import { toast } from "./toast";
 
 /**
  * Reminders and mentions for the person using this device:
- *  - a task that newly appears with your @name (an agent, another device
- *    or a teammate wrote it) — not what you type yourself;
+ *  - a task that newly appears with your @name (an agent or the file
+ *    mirror wrote it) — not what you type yourself;
  *  - a daily summary of your tasks that are due today or overdue.
  * Shown as a toast, or a system notification while the app is in the
  * background.
@@ -36,17 +36,14 @@ export function setNotificationsEnabled(on: boolean) {
 
 /** Lowercase @names that mean "me". */
 function myHandles(): Set<string> {
-  const { displayName, user } = useAuth.getState();
   const out = new Set(["me", "you"]);
-  const name = displayName.trim().toLowerCase();
+  const name = useProfile.getState().name.trim().toLowerCase();
   if (name) {
     out.add(name);
     out.add(name.replace(/\s+/g, "-"));
     out.add(name.replace(/\s+/g, ""));
     out.add(name.split(/\s+/)[0]);
   }
-  const local = user?.email.split("@")[0]?.toLowerCase();
-  if (local) out.add(local);
   return out;
 }
 
@@ -85,8 +82,12 @@ export function startNotifications(): () => void {
   const digest = () => {
     const today = isoDay(new Date());
     try {
-      if (localStorage.getItem(DIGEST_KEY) === today) return;
+      const last = localStorage.getItem(DIGEST_KEY);
+      if (last === today) return;
       localStorage.setItem(DIGEST_KEY, today);
+      // The very first start shows the sample workspace — its tasks are
+      // examples, not a to-do list worth a reminder.
+      if (last === null) return;
     } catch {
       /* storage unavailable — summarize once per start */
     }
@@ -107,11 +108,8 @@ export function startNotifications(): () => void {
     if (notificationsEnabled()) digest();
   };
 
-  // Wait for the first pull of an account workspace before treating its
-  // tasks as "already known".
   const tryPrime = () => {
-    if (primed || useWorkspace.getState().syncStatus === "syncing") return;
-    prime();
+    if (!primed) prime();
   };
   const schedulePrime = () => {
     primed = false;
@@ -137,18 +135,17 @@ export function startNotifications(): () => void {
   };
 
   const unsubDocs = useWorkspace.subscribe((s, prev) => {
-    if (s.syncStatus !== prev.syncStatus) tryPrime();
     if (s.docs === prev.docs) return;
     if (debounce) clearTimeout(debounce);
     debounce = setTimeout(check, 1200);
   });
-  const unsubAuth = useAuth.subscribe((s, prev) => {
-    if (s.status !== prev.status || s.workspaceId !== prev.workspaceId) schedulePrime();
+  const unsubName = useProfile.subscribe((s, prev) => {
+    if (s.name !== prev.name) schedulePrime();
   });
 
   return () => {
     unsubDocs();
-    unsubAuth();
+    unsubName();
     if (timer) clearTimeout(timer);
     if (debounce) clearTimeout(debounce);
   };

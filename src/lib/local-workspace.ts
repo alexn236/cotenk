@@ -1,10 +1,8 @@
 import type { Doc, Folder } from "./types";
 
 /**
- * The device's own workspace (signed out), cached in the browser.
- * Accounts are backed by Supabase (and their own folder on desktop) and
- * never write here; after signing in, the merge dialog offers to move
- * pages from here into the account (see local-merge.ts).
+ * The workspace, cached in the browser. On desktop it is also mirrored
+ * to the workspace folder (see file-sync.ts).
  */
 
 const KEY = "cotenk-local-workspace";
@@ -28,13 +26,5 @@ export function saveLocalWorkspace(ws: LocalWorkspace) {
     localStorage.setItem(KEY, JSON.stringify(ws));
   } catch {
     /* storage unavailable or full */
-  }
-}
-
-export function clearLocalWorkspace() {
-  try {
-    localStorage.removeItem(KEY);
-  } catch {
-    /* storage unavailable */
   }
 }
