@@ -29,7 +29,11 @@ export function MarketNav() {
   const cards = useMarketCards();
 
   const count = (c: MarketCategory) =>
-    c === "All" ? cards.length : cards.filter((x) => x.category === c).length;
+    c === "All"
+      ? cards.length
+      : c === "Yours"
+        ? cards.filter((x) => x.userTemplateId).length
+        : cards.filter((x) => x.category === c).length;
 
   const row = (active: boolean) =>
     `relative flex h-7 w-full items-center gap-2 rounded-[6px] px-2 text-[13px] transition-colors duration-150 ${
@@ -64,7 +68,7 @@ export function MarketNav() {
       {tab === "discover" && (
         <section className="mt-3">
           <div className={SECTION_LABEL}>Categories</div>
-          {(["All", ...TEMPLATE_CATEGORIES] as MarketCategory[]).map((c) => (
+          {(["All", "Yours", ...TEMPLATE_CATEGORIES] as MarketCategory[]).map((c) => (
             <button
               key={c}
               type="button"

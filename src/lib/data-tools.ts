@@ -4,6 +4,7 @@ import { useAgent } from "./agent-store";
 import { saveBytes } from "./files";
 import { readAsset } from "./images";
 import { isDesktop } from "./workspace";
+import { isHtmlPage } from "./html-page";
 import type { Doc, Folder } from "./types";
 
 /**
@@ -33,14 +34,15 @@ function pagePaths(docs: Doc[], folders: Folder[]): Map<string, string> {
     const parent = d.parentId ? byId.get(d.parentId) : undefined;
     let dir =
       parent && depth < 8
-        ? place(parent, depth + 1).replace(/\.md$/, "")
+        ? place(parent, depth + 1).replace(/\.(md|html)$/, "")
         : d.folderId
           ? (folderName.get(d.folderId) ?? "")
           : "";
     dir = dir ? `${dir}/` : "";
-    let path = `${dir}${slug(d.title)}.md`;
+    const ext = isHtmlPage(d.content) ? ".html" : ".md";
+    let path = `${dir}${slug(d.title)}${ext}`;
     for (let i = 2; used.has(path.toLowerCase()); i++) {
-      path = `${dir}${slug(d.title)}-${i}.md`;
+      path = `${dir}${slug(d.title)}-${i}${ext}`;
     }
     used.add(path.toLowerCase());
     out.set(d.id, path);
@@ -88,7 +90,9 @@ export async function exportWorkspace(
     const depth = path.split("/").length - 1;
     const body = localizeRefs(d.content, depth + 1, found);
     files[`pages/${path}`] = strToU8(
-      `---\ntitle: ${JSON.stringify(d.title.trim() || "Untitled")}\n---\n\n${body}\n`,
+      isHtmlPage(d.content)
+        ? body
+        : `---\ntitle: ${JSON.stringify(d.title.trim() || "Untitled")}\n---\n\n${body}\n`,
     );
   }
 

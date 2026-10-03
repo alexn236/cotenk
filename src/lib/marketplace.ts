@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import type { TemplateCategory } from "./templates";
 
-export type MarketCategory = TemplateCategory | "All";
+/** "Yours" shows the templates you saved or built. */
+export type MarketCategory = TemplateCategory | "All" | "Yours";
 
 type MarketState = {
   category: MarketCategory;

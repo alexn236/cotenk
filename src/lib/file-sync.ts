@@ -5,6 +5,7 @@ import { isDesktop, resolveWorkspaceDir } from "./workspace";
 import type { Doc, Folder } from "./types";
 import { noteDiskChange } from "./activity";
 import { newId } from "./ids";
+import { isHtmlPage } from "./html-page";
 
 /**
  * Workspace folder sync: mirrors docs/folders into a local directory as
@@ -13,8 +14,9 @@ import { newId } from "./ids";
  *   store → reconcile → files
  *   agent edits file → watcher → reconcile → store
  *
- * Every file carries a small frontmatter block so its identity survives
- * renames and moves:
+ * Markdown pages are `.md` files, artifact pages (one HTML document, see
+ * html-page.ts) are `.html` files. Every file carries its identity so it
+ * survives renames and moves — markdown in a frontmatter block:
  *
  *   ---
  *   cotenk-id: <doc id>
@@ -24,6 +26,12 @@ import { newId } from "./ids";
  *   ---
  *
  *   <markdown body>
+ *
+ * and HTML in one comment right after the doctype:
+ *
+ *   <!doctype html>
+ *   <!-- cotenk: {"id":"…","title":"…","folder":"","pinned":false} -->
+ *   <html>…
  *
  * Reconcile is bidirectional and idempotent: identical states produce
  * zero writes, so watcher events triggered by our own writes settle
@@ -66,8 +74,17 @@ export function docRelativePath(doc: Doc, folders: Folder[]): string {
     ? folders.find((f) => f.id === doc.folderId)
     : undefined;
   const dir = folder ? `${slug(folder.name)}/` : "";
-  return `${dir}${slug(doc.title)}.md`;
+  return `${dir}${slug(doc.title)}${extFor(doc)}`;
 }
+
+/** `.html` for artifact pages, `.md` for everything else. */
+const extFor = (doc: Pick<Doc, "content">) =>
+  isHtmlPage(doc.content) ? ".html" : ".md";
+
+const isHtmlPath = (p: string) => /\.html?$/i.test(p);
+
+const HTML_META_RE = /<!--\s*cotenk:\s*(\{[\s\S]*?\})\s*-->[ \t]*\n?/;
+const DOCTYPE_RE = /^\s*<!doctype[^>]*>[ \t]*\n?/i;
 
 /** Workspace-relative directory of a folder, e.g. "q3-plans/". */
 export function folderRelativePath(folder: Folder): string {
@@ -98,6 +115,22 @@ function joinPath(...parts: string[]): string {
 
 function serialize(doc: Doc, folderName: string | null): string {
   const title = doc.title.replace(/\n/g, " ").trim() || "Untitled";
+  if (isHtmlPage(doc.content)) {
+    // "<" and ">" escaped so the JSON can never close the comment.
+    const meta = JSON.stringify({
+      id: doc.id,
+      title,
+      folder: folderName ?? "",
+      pinned: doc.pinned,
+    }).replace(/[<>]/g, (c) => (c === "<" ? "\\u003c" : "\\u003e"));
+    const comment = `<!-- cotenk: ${meta} -->\n`;
+    const doctype = DOCTYPE_RE.exec(doc.content);
+    return doctype
+      ? doc.content.slice(0, doctype[0].length).replace(/\n?$/, "\n") +
+          comment +
+          doc.content.slice(doctype[0].length)
+      : comment + doc.content;
+  }
   return (
     `---\ncotenk-id: ${doc.id}\ntitle: ${title}\n` +
     `folder: ${folderName ?? ""}\npinned: ${doc.pinned}\n---\n\n` +
@@ -117,10 +150,36 @@ function sameTitle(fileTitle: string | null, docTitle: string): boolean {
   );
 }
 
+function parseHtmlFile(path: string, mtime: number, raw: string): Scanned {
+  const m = HTML_META_RE.exec(raw);
+  let meta: { id?: unknown; title?: unknown; folder?: unknown; pinned?: unknown } = {};
+  if (m && m.index < 400) {
+    try {
+      meta = JSON.parse(m[1]);
+    } catch {
+      /* broken comment — adopt the file as a new page */
+    }
+  }
+  let content = m && m.index < 400 ? raw.slice(0, m.index) + raw.slice(m.index + m[0].length) : raw;
+  // A bare HTML fragment becomes a full document, so it opens as a page.
+  if (!isHtmlPage(content)) content = `<!doctype html>\n${content}`;
+  const str = (v: unknown) => (typeof v === "string" ? v : null);
+  return {
+    path,
+    mtime,
+    id: str(meta.id),
+    title: str(meta.title),
+    folderName: str(meta.folder) || null,
+    pinned: meta.pinned === true,
+    content,
+  };
+}
+
 function parseFile(path: string, mtime: number, text: string): Scanned {
   // Agents on Windows may write CRLF or a BOM; without normalizing, the
   // frontmatter doesn't match and the page gets re-adopted under a new id.
   const raw = text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+  if (isHtmlPath(path)) return parseHtmlFile(path, mtime, raw);
   const m = raw.match(FM_RE);
   if (!m) {
     return {
@@ -174,8 +233,9 @@ function docPath(
     ? slug(foldersById.get(doc.folderId)?.name ?? "")
     : "";
   const base = slug(doc.title);
+  const ext = extFor(doc);
   for (let i = 0; ; i++) {
-    const name = i === 0 ? `${base}.md` : `${base}-${i + 1}.md`;
+    const name = i === 0 ? `${base}${ext}` : `${base}-${i + 1}${ext}`;
     const p = joinPath(root, dir, name);
     const owner = taken.get(pathKey(p));
     if (owner === undefined || owner === doc.id) {
@@ -289,14 +349,33 @@ async function reconcile() {
             );
             changed = true;
           }
+        } else if (f.id && !knownFileIds.has(f.id)) {
+          // A page file this app doesn't know (copied in from another
+          // workspace, or local data was cleared): adopt it with its own
+          // id. Only files of pages deleted here may be removed below.
+          const doc2: Doc = {
+            id: f.id,
+            folderId: folderFor(f.folderName),
+            title: f.title?.trim() || "Untitled",
+            content: f.content,
+            pinned: f.pinned,
+            updatedAt: f.mtime || Date.now(),
+          };
+          docs = [doc2, ...docs];
+          docsById.set(doc2.id, doc2);
+          changed = true;
         } else if (!f.id) {
-          // Foreign markdown file (agent/user dropped it in) — adopt.
+          // Foreign file (agent/user dropped it in) — adopt.
           const stem =
-            f.path.split(/[\\/]/).pop()?.replace(/\.md$/i, "") ?? "Untitled";
-          // A leading "# Title" becomes the page title — drop it from the
-          // body, or the editor shows the title twice.
-          const lead = f.content.match(/^\s*#\s+(.+)\n*/);
-          const h1 = (lead?.[1] ?? f.content.match(/^#\s+(.+)$/m)?.[1])?.trim();
+            f.path.split(/[\\/]/).pop()?.replace(/\.(md|html?)$/i, "") ?? "Untitled";
+          const html = isHtmlPath(f.path);
+          // Markdown: a leading "# Title" becomes the page title — drop it
+          // from the body, or the editor shows the title twice. HTML: the
+          // document's <title>.
+          const lead = html ? null : f.content.match(/^\s*#\s+(.+)\n*/);
+          const h1 = html
+            ? /<title[^>]*>([^<]*)<\/title>/i.exec(f.content)?.[1]?.trim()
+            : (lead?.[1] ?? f.content.match(/^#\s+(.+)$/m)?.[1])?.trim();
           const parentDir = f.path.replace(/[\\/][^\\/]+$/, "");
           const inSubdir =
             parentDir.replace(/\\/g, "/") !== root.replace(/\\/g, "/");

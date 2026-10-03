@@ -156,7 +156,7 @@ function caretOnVisualEdge(
     : rel + lineHeight >= contentHeight - 1;
 }
 
-const EMBED_HEIGHT_SCRIPT = `<script>(function(){var s=function(){var b=document.body;var h=Math.max(b?b.scrollHeight:0,document.documentElement.scrollHeight);parent.postMessage({cotenkEmbedHeight:h},"*")};window.addEventListener("load",s);try{new ResizeObserver(s).observe(document.body)}catch(e){}s()})();</script>`;
+const EMBED_HEIGHT_SCRIPT = `<script>(function(){var last=0;function h(){var d=document.documentElement,b=document.body,m=Math.max(d?d.scrollHeight:0,b?b.scrollHeight:0);if(b){for(var i=0;i<b.children.length;i++){var r=b.children[i].getBoundingClientRect();m=Math.max(m,Math.ceil(r.bottom+window.scrollY))}}return m}function s(){var v=h();if(v!==last){last=v;parent.postMessage({cotenkEmbedHeight:v},"*")}}window.addEventListener("load",s);document.addEventListener("load",s,true);try{var ro=new ResizeObserver(s);ro.observe(document.documentElement);if(document.body)ro.observe(document.body)}catch(e){}try{new MutationObserver(s).observe(document.documentElement,{childList:true,subtree:true,attributes:true,characterData:true})}catch(e){}var n=0,t=setInterval(function(){s();if(++n>20)clearInterval(t)},150);s()})();</script>`;
 
 /**
  * Wraps embed HTML in a full document. The current theme is injected as
@@ -164,7 +164,7 @@ const EMBED_HEIGHT_SCRIPT = `<script>(function(){var s=function(){var b=document
  * light and dark mode without knowing either.
  */
 function embedDoc(html: string, scheme: string, state: string | null): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><style>${embedThemeCss(scheme)}html,body{margin:0;padding:0;background:transparent}body{color:var(--ck-ink);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}</style>${embedApiScript(state)}</head><body>${html}${EMBED_HEIGHT_SCRIPT}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><style>${embedThemeCss(scheme)}html,body{margin:0;padding:0;background:transparent;height:auto!important;min-height:0!important}body{color:var(--ck-ink);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}</style>${embedApiScript(state)}</head><body>${html}${EMBED_HEIGHT_SCRIPT}</body></html>`;
 }
 
 export type BlockProps = {

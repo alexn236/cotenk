@@ -7,12 +7,14 @@ import {
   MagnifyingGlass,
   Plus,
   Sparkle,
+  Trash,
   Storefront,
 } from "@phosphor-icons/react";
 import { useWorkspace } from "@/lib/store";
 import { useAgent } from "@/lib/agent-store";
 import { useMarket } from "@/lib/marketplace";
 import { askAgent } from "@/lib/agent-actions";
+import { captureBuiltPages, useUserTemplates } from "@/lib/user-templates";
 import { toast } from "@/lib/toast";
 import { DESKTOP_ONLY_MESSAGE, isDesktop } from "@/lib/workspace";
 import { DocPreview } from "@/components/editor/doc-preview";
@@ -61,11 +63,17 @@ function Discover() {
   const [preview, setPreview] = useState<MarketCard | null>(null);
 
   const q = query.trim().toLowerCase();
-  const visible = cards.filter(
+  const matches = (c: MarketCard) =>
+    !q || `${c.title} ${c.description} ${c.author}`.toLowerCase().includes(q);
+  const mine = cards.filter(
+    (c) => c.userTemplateId && (category === "All" || category === "Yours") && matches(c),
+  );
+  const builtIn = cards.filter(
     (c) =>
+      !c.userTemplateId &&
+      category !== "Yours" &&
       (category === "All" || c.category === category) &&
-      (!q ||
-        `${c.title} ${c.description} ${c.author}`.toLowerCase().includes(q)),
+      matches(c),
   );
 
   return (
@@ -92,12 +100,26 @@ function Discover() {
         </div>
       </div>
 
-      <Shelf
-        label="Templates"
-        cards={visible}
-        onOpen={setPreview}
-        empty="No templates match."
-      />
+      {(mine.length > 0 || category === "Yours") && (
+        <Shelf
+          label="Your templates"
+          cards={mine}
+          onOpen={setPreview}
+          empty={
+            q
+              ? "None of your templates match."
+              : "Nothing here yet — use “Save as template” in any page's ⋯ menu, or build one with AI."
+          }
+        />
+      )}
+      {category !== "Yours" && (
+        <Shelf
+          label="Templates"
+          cards={builtIn}
+          onOpen={setPreview}
+          empty="No templates match."
+        />
+      )}
 
       <PreviewModal card={preview} onClose={() => setPreview(null)} />
     </>
@@ -180,7 +202,9 @@ function Card({
       </button>
       <div className="mt-4 flex items-center gap-2 text-[11.5px] text-ink-3">
         <span className="flex min-w-0 items-center gap-1">
-          <CheckCircle size={12} weight="fill" className="shrink-0 text-accent" />
+          {!card.userTemplateId && (
+            <CheckCircle size={12} weight="fill" className="shrink-0 text-accent" />
+          )}
           <span className="truncate">{card.author}</span>
         </span>
         <button
@@ -222,6 +246,20 @@ function PreviewModal({
       footer={
         card && (
           <>
+            {card.userTemplateId && (
+              <button
+                type="button"
+                className={`${btn.secondary} mr-auto hover:text-danger`}
+                onClick={() => {
+                  useUserTemplates.getState().remove(card.userTemplateId!);
+                  toast(`Removed “${card.title}” from your templates`);
+                  onClose();
+                }}
+              >
+                <Trash size={13} />
+                Delete template
+              </button>
+            )}
             <button type="button" onClick={onClose} className={btn.secondary}>
               Close
             </button>
@@ -273,7 +311,7 @@ function buildPrompt(desc: string, interactive: boolean): string {
   return [
     `Create a new CoTenk page for this request: "${desc}".`,
     `Write it as a new .md file in the workspace root. The first line must be "# <a short, fitting title>". Structure it with headings, tasks and tables where they help.`,
-    `If the request is for a website, landing page, app or game, build it as an HTML page instead (and, for a website with several pages, one HTML page per page, linked with href="cotenk:page/<title>"), as the workspace guide describes — then mention that it can be published with "Export site".`,
+    `If the request is for a tool, website, landing page, app or game, build it as an artifact page instead — a new .html file with one complete HTML document and a <title> (for a website with several pages, one .html file per page, linked with href="cotenk:page/<title>") — as the workspace guide describes. For a website, mention that it can be published with "Export site".`,
     interactive
       ? "Include at least one interactive HTML embed that makes the page genuinely useful (for example a calculator, tracker, chart or checklist widget), following the embed conventions."
       : "Do not add HTML embeds — plain markdown only.",
@@ -294,6 +332,8 @@ function BuildWithAi() {
       prompt: buildPrompt(d, interactive),
       title: `Build: ${d}`,
     });
+    // What the agent builds also lands in "Your templates".
+    captureBuiltPages();
   };
 
   return (

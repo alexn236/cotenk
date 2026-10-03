@@ -5,7 +5,7 @@ description: Use when working inside a CoTenk workspace folder (a directory of .
 
 # Working in a CoTenk workspace
 
-CoTenk is a local-first workspace where people and AI agents share pages, tasks and context. It stores Notion-style pages, tasks and interactive embeds as plain markdown files. Your current directory is the workspace root. Every page is a `.md` file here, and the CoTenk app watches the folder:
+CoTenk is a local-first workspace where people and AI agents share pages, tasks and context. Your current directory is the workspace root. Every page is a file here — a `.md` file for a markdown page, an `.html` file for an artifact page (an app, a tool, a website) — and the CoTenk app watches the folder:
 
 - You edit real files. Whatever you save shows up within about a second in the page the user has open, often while they watch — the blocks you wrote light up with an "agent" tag.
 - The user can undo your change with Ctrl+Z, but only while that page is open. Don't count on it. Edit carefully.
@@ -18,10 +18,12 @@ CoTenk is a local-first workspace where people and AI agents share pages, tasks 
 | --- | --- | --- |
 | Notes, docs, plans, meeting notes | a markdown page | 1–2 |
 | A to-do someone (or an agent) owns | a task: `- [ ] text @owner due:YYYY-MM-DD` | 3 |
-| A chart, tracker, calculator or diagram inside a page | an interactive embed (HTML block) | 4 |
+| A small chart, tracker or diagram *inside* a page of notes | an interactive embed (HTML block) | 4 |
 | A picture in a page | an image file in `assets/` + `![caption](cotenk-image:assets/…)` | 2 |
-| An app, a game, a landing page, a dashboard that fills the page | an HTML page | 5 |
-| A real website with several pages | several HTML pages linked with `href="cotenk:page/<Title>"` — the user can export it as a static site | 5 |
+| A tool, app, game, viewer, calculator, dashboard or landing page — anything where the interactive part *is* the page | an artifact page: a `.html` file | 5 |
+| A real website with several pages | several artifact pages linked with `href="cotenk:page/<Title>"` — the user can export it as a static site | 5 |
+
+Rule of thumb: if the user asks for *a tool* ("a star-history viewer", "a pricing calculator", "a habit tracker"), make an artifact page — it gets the whole page and a real layout. Use an embed only for a widget that illustrates notes around it.
 | Pages that reference each other | `[[Page title]]` links | 2 |
 
 ## 1. Files and frontmatter
@@ -60,7 +62,7 @@ pinned: false
 
 - Folders are exactly one level deep. Files nested deeper are flattened into a folder named after their parent directory.
 - Stay inside the workspace. Never write pages outside it or in dot-folders (`.claude/`, `.git/`). Those hold tooling, not pages.
-- Every `.md` file in the workspace becomes a page, so don't leave scratch or temp `.md` files behind.
+- Every `.md` and `.html` file in the workspace becomes a page (except inside `assets/`), so don't leave scratch or temp files with those extensions behind.
 - If the user is typing in the same page, the newer change wins. Re-read right before each edit, make targeted replacements instead of rewriting the whole file, and check afterwards that your change stuck.
 
 ## 2. Markdown that renders
@@ -174,18 +176,19 @@ document.getElementById("sum").textContent=done+" of "+all+" tasks done";
 
 In the page, put the HTML as-is, without the code fence. Set text with `textContent`, not `innerHTML`, whenever the text comes from data.
 
-## 5. HTML pages, apps and websites
+## 5. Artifact pages: apps, tools and websites
 
-When the user wants a whole page that is an app, a landing page, a game, a dashboard or a website — anything beyond blocks — make an **HTML page**: a page whose entire body is one HTML document. CoTenk recognises it by its first tag and runs it full-size in a sandboxed frame; the user can switch between the page, its code, or both side by side.
+When the user wants a tool, an app, a game, a dashboard, a landing page or a website — anything where the interactive part is the page — make an **artifact page**: an `.html` file holding one complete HTML document. CoTenk runs it full-size in a sandboxed frame; the user can switch between the page, its code, or both side by side.
+
+**Create one** by writing a new file `<slug>.html` (e.g. `pricing-calculator.html`, or `q3-plans/pricing-calculator.html` inside a folder) — no frontmatter, no `# Title` line, just the document. The page title comes from `<title>`:
 
 ```html
-# Pricing calculator
-
 <!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pricing calculator</title>
 <style>
   body { max-width: 760px; margin: 0 auto; padding: 48px 32px; }
 </style>
@@ -197,7 +200,17 @@ When the user wants a whole page that is an app, a landing page, a game, a dashb
 </html>
 ```
 
-- The body (after the frontmatter or the `# Title` line) must start with `<!doctype html>` or `<html>`. Nothing else may come before it, and no markdown after it. Blank lines are fine.
+Within about a second CoTenk adopts the file and adds one identity comment right after the doctype:
+
+```html
+<!doctype html>
+<!-- cotenk: {"id":"doc-m1abc23-0","title":"Pricing calculator","folder":"","pinned":false} -->
+<html>…
+```
+
+- **Never change or remove that comment's `id`** — it's the page's identity, like `cotenk-id` in markdown. To rename the page, change `"title"` in the comment; to move it, `"folder"`. Re-read the file before editing it again after creating it.
+- The file must start with `<!doctype html>` or `<html>` (the identity comment may follow the doctype). Blank lines are fine.
+- An older artifact page may still be a `.md` file whose body is an HTML document; CoTenk turns it into an `.html` file by itself. Don't do it by hand.
 - Same sandbox as embeds (section 4): the listed CDNs, Google Fonts and https images work; `fetch` to other hosts, `localStorage` and popups don't. Keep state with `cotenk.save()` / `cotenk.state`. Set text from data with `textContent`.
 - The page background is already `var(--ck-canvas)` with `font:15px/1.6 system-ui`. For pages that belong to the workspace (tools, dashboards), use the `var(--ck-…)` colors so they follow light and dark mode. A website with its own brand may use its own palette.
 - Make it responsive (`<meta name="viewport">`, flexible layouts) — it may be shown in a narrow side panel or exported to the web.
@@ -207,7 +220,7 @@ When the user wants a whole page that is an app, a landing page, a game, a dashb
 
 A website is a set of HTML pages that link to each other:
 
-1. Make one HTML page per site page, e.g. "Acme", "Acme — Pricing", "Acme — About". Use distinctive titles so they don't clash with the user's other pages.
+1. Make one artifact page (`.html` file) per site page, e.g. "Acme", "Acme — Pricing", "Acme — About". Use distinctive titles so they don't clash with the user's other pages.
 2. Link them with `<a href="cotenk:page/Acme%20%E2%80%94%20Pricing">Pricing</a>` (the page title, URL-encoded). In CoTenk the link opens that page; external links open in the browser.
 3. Repeat the shared header, nav and footer on every page (there is no include mechanism), and keep the CSS identical so the pages feel like one site.
 4. Tell the user they can publish it: on the start page, **Export site** (or page menu → Export as website) saves a `.zip` with `index.html` plus one `.html` file per linked page, links rewritten to the files — ready for any static host (Netlify, GitHub Pages, Cloudflare Pages). `cotenk.save()` state then lives in the visitor's browser.
@@ -233,7 +246,8 @@ This is a productivity tool. Help the user get things done and keep pages easy t
 - **Weekly review:** find the pages changed in the last 7 days (by file modification time), then fill `## Wins`, `## What didn't go well` and `## Next week` (3 prioritized tasks). List overdue open tasks by name.
 - **Dashboard page:** gather the data from the workspace (tasks by owner or due date, numbers from pages) and write a short intro line with `_Updated YYYY-MM-DD_`. Add one or two embeds with the data baked in, plus a `## Highlights` bullet list and a `## Watch list` of tasks. Embeds can't read the workspace live, so re-run the recipe to refresh.
 - **Add a diagram:** build a flow, timeline or chart embed (section 4) from the page's content and place it right after the section it illustrates.
-- **Landing page / website:** ask (or infer) the product, audience and tone, then build it as HTML pages (section 5): a start page with hero, features, social proof and a call to action, plus linked subpages if asked. Finish by telling the user about **Export site**.
+- **Tool or app:** build it as one artifact page (section 5) with a clear header, the controls at the top and room for the result — not as an embed squeezed into a markdown page.
+- **Landing page / website:** ask (or infer) the product, audience and tone, then build it as artifact pages (section 5): a start page with hero, features, social proof and a call to action, plus linked subpages if asked. Finish by telling the user about **Export site**.
 - **Polish:** tighten the wording and structure, but keep every fact, task, owner, due date and embed. Never change a task's checked state.
 
 ## 8. Don't

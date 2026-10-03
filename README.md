@@ -143,7 +143,7 @@ speaks JSON-RPC over it. Each chat is bound to one agent.
 
 | What | Desktop | Browser (`npm run dev`) |
 | --- | --- | --- |
-| Pages | workspace folder (`.md` + frontmatter) and a local cache | `localStorage` |
+| Pages | workspace folder (`.md` for markdown, `.html` for artifact pages) and a local cache | `localStorage` |
 | Images and files | `<workspace>/assets/` | small images inline as data URLs |
 | Chats, history, settings | `localStorage` of the app | `localStorage` |
 | Skills & MCP servers | app data folder (`extensions/`) | — |
@@ -162,8 +162,18 @@ pinned: true|false
 <markdown body>
 ```
 
-Markdown files without `cotenk-id` that appear in the folder (dropped in
-by you or an agent) are adopted as new pages, never deleted.
+Artifact pages (apps, tools, websites) are `.html` files that carry the
+same identity in one comment right after the doctype:
+
+```html
+<!doctype html>
+<!-- cotenk: {"id":"<page id>","title":"<page title>","folder":"","pinned":false} -->
+<html>…
+```
+
+Page files without an identity that appear in the folder (dropped in by
+you or an agent) are adopted as new pages, never deleted. Files in
+`assets/` are attachments, not pages.
 
 </details>
 

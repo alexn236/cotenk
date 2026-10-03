@@ -550,7 +550,9 @@ struct FileEntry {
     mtime: u64,
 }
 
-/// All `.md` files under `root`, recursively, with modification times.
+/// All page files (`.md` and `.html`) under `root`, recursively, with
+/// modification times. Dot folders (agent config) and the top-level
+/// `assets/` folder (images and attached files) are not pages.
 #[tauri::command]
 fn fs_list_md(root: String) -> Result<Vec<FileEntry>, String> {
     let mut out = Vec::new();
@@ -564,16 +566,22 @@ fn fs_list_md(root: String) -> Result<Vec<FileEntry>, String> {
             let p = entry.path();
             if p.is_dir() {
                 // Dot folders hold agent config (.claude/skills, .git) —
-                // their markdown is not workspace pages.
-                let hidden = p
+                // their markdown is not workspace pages. `assets/` holds
+                // attachments, which may be .md or .html files too.
+                let name = p
                     .file_name()
-                    .is_some_and(|n| n.to_string_lossy().starts_with('.'));
-                if !hidden {
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let skip = name.starts_with('.') || (dir.as_path() == Path::new(&root) && name == "assets");
+                if !skip {
                     stack.push(p);
                 }
                 continue;
             }
-            if !p.extension().is_some_and(|e| e == "md") {
+            if !p
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("html"))
+            {
                 continue;
             }
             let mtime = entry

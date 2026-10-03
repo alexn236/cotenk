@@ -13,6 +13,7 @@ import {
   Lightning,
   PushPin,
   PushPinSlash,
+  Stack,
   Trash,
   type Icon,
 } from "@phosphor-icons/react";
@@ -20,10 +21,11 @@ import { trashDoc, useWorkspace } from "@/lib/store";
 import { toast } from "@/lib/toast";
 import { isHtmlPage } from "@/lib/html-page";
 import { exportSite } from "@/lib/site-export";
+import { saveAsTemplate } from "@/lib/user-templates";
 import type { Doc } from "@/lib/types";
 
 /** Approximate height, used by callers to flip menus near the bottom. */
-export const PAGE_MENU_HEIGHT = 340;
+export const PAGE_MENU_HEIGHT = 370;
 
 const ITEM =
   "flex h-7 w-full items-center gap-2 rounded-[6px] px-2 text-left text-[12.5px] text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink";
@@ -176,6 +178,11 @@ export function PageMenuItems({
         icon={ClockCounterClockwise}
         label="Version history"
         onClick={done(() => setHistoryDocId(doc.id))}
+      />
+      <MenuButton
+        icon={Stack}
+        label="Save as template"
+        onClick={done(() => saveAsTemplate(doc))}
       />
       {isHtmlPage(doc.content) && (
         <MenuButton
