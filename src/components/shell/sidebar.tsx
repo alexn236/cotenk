@@ -1,6 +1,9 @@
 import { motion } from "motion/react";
 import {
+  ChatCircle,
+  ClockCounterClockwise,
   DownloadSimple,
+  FileText,
   FolderPlus,
   MagnifyingGlass,
   Plus,
@@ -16,6 +19,7 @@ import type { Doc, Folder } from "@/lib/types";
 import { TasksNav } from "@/components/tasks/tasks-nav";
 import { SettingsNav } from "@/components/settings/settings-nav";
 import { AgentsNav } from "@/components/agents/agents-nav";
+import { useAgent } from "@/lib/agent-store";
 import { MarketNav } from "@/components/market/market-nav";
 import { DocRow } from "./doc-row";
 import { FolderSection } from "./folder-section";
@@ -177,6 +181,7 @@ function DocsNav({
   const [rootOver, setRootOver] = useState(false);
   return (
     <>
+      <RecentSection />
       {pinned.length > 0 && (
             <section className="mb-1">
               <div className="flex items-center gap-1.5 px-2 pb-1 pt-1 text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-3">
@@ -272,5 +277,63 @@ function DocsNav({
             </button>
           </section>
     </>
+  );
+}
+
+const RECENT_ROW =
+  "flex h-7 w-full items-center gap-2 rounded-[6px] px-2 text-left text-[13px] text-ink-2 transition-colors duration-150 hover:bg-hover hover:text-ink";
+
+/** The last two pages and the last two agent chats — one click back in. */
+function RecentSection() {
+  const docs = useWorkspace((s) => s.docs);
+  const activeDocId = useWorkspace((s) => s.activeDocId);
+  const railSection = useWorkspace((s) => s.railSection);
+  const setActiveDoc = useWorkspace((s) => s.setActiveDoc);
+  const setRailSection = useWorkspace((s) => s.setRailSection);
+  const chats = useAgent((s) => s.chats);
+  const selectChat = useAgent((s) => s.selectChat);
+
+  const recentDocs = [...docs].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 2);
+  const recentChats = chats
+    .filter((c) => c.messages.length > 0)
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, 2);
+  if (recentDocs.length + recentChats.length === 0) return null;
+
+  return (
+    <section className="mb-2">
+      <div className="flex items-center gap-1.5 px-2 pb-1 pt-1 text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-3">
+        <ClockCounterClockwise size={12} />
+        Recent
+      </div>
+      {recentDocs.map((d) => (
+        <button
+          key={d.id}
+          type="button"
+          onClick={() => setActiveDoc(d.id)}
+          className={`${RECENT_ROW} ${
+            railSection === "docs" && activeDocId === d.id ? "bg-elev text-ink" : ""
+          }`}
+        >
+          <FileText size={15} className="shrink-0 text-ink-3" />
+          <span className="truncate">{d.title.trim() || "Untitled"}</span>
+        </button>
+      ))}
+      {recentChats.map((c) => (
+        <button
+          key={c.id}
+          type="button"
+          onClick={() => {
+            selectChat(c.id);
+            setRailSection("agents");
+          }}
+          className={RECENT_ROW}
+        >
+          <ChatCircle size={15} className="shrink-0 text-ink-3" />
+          <span className="min-w-0 flex-1 truncate">{c.title.trim() || "New chat"}</span>
+          <span className="shrink-0 font-mono text-[10px] text-ink-3">{c.agent}</span>
+        </button>
+      ))}
+    </section>
   );
 }

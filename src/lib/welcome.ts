@@ -17,12 +17,15 @@ import { stripEmbedState } from "./embed-state";
 export { WELCOME_ID };
 
 /** Ids earlier versions used. */
-const LEGACY_IDS = new Set(["d-welcome"]);
+const LEGACY_IDS = new Set(["d-welcome", "d-welcome-v2"]);
 
 /** Fingerprints of the untouched content of every earlier version. */
 const LEGACY_FINGERPRINTS = new Set([
   "5bc28c97", // v0 — first release
   "71d2ffb8", // v1 — pulse chart + burndown
+  "d194afb1", // v2 — with account / sign-in copy
+  "dcca9d37", // v2 — local-only copy
+  "c2b7fafc", // v2 — [[Sync Architecture]] link
 ]);
 
 /**

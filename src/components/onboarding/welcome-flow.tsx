@@ -1,17 +1,25 @@
 import { useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { ArrowLeft, ArrowRight, CheckCircle } from "@phosphor-icons/react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  CheckCircle,
+  Eye,
+  Lightning,
+} from "@phosphor-icons/react";
 import { isDesktop } from "@/lib/workspace";
 import { btn } from "@/components/ui/styles";
 import { ThemePicker } from "@/components/ui/theme-picker";
 import { AgentOnboardingSteps } from "@/components/agents/agent-onboarding";
 import { WelcomeDemo } from "./welcome-demo";
+import { usePermissions, type ApprovalMode } from "@/lib/agent-permissions";
 
-type Screen = "welcome" | "theme" | "agents" | "done";
+type Screen = "welcome" | "theme" | "changes" | "agents" | "done";
 
 const WIDTH: Record<Screen, number> = {
   welcome: 520,
   theme: 600,
+  changes: 600,
   agents: 560,
   done: 420,
 };
@@ -75,14 +83,20 @@ function Progress({ screens, current }: { screens: Screen[]; current: Screen }) 
 }
 
 /**
- * Full-screen first run: welcome → theme → agents (desktop) or "all
- * set" (web). Everything stays on this device — there is no account.
+ * Full-screen first run: welcome → theme → agent changes (review or
+ * auto-approve) → agents on desktop, or welcome → theme → "all set" on
+ * the web. Everything stays on this device — there is no account.
  */
 export function WelcomeFlow({ onDone }: { onDone: () => void }) {
   const reduceMotion = useReducedMotion();
   const [screen, setScreen] = useState<Screen>("welcome");
   const desktop = isDesktop();
   const last: Screen = desktop ? "agents" : "done";
+  const steps: Screen[] = desktop
+    ? ["welcome", "theme", "changes", "agents"]
+    : ["welcome", "theme", "done"];
+  const next = (from: Screen) => steps[steps.indexOf(from) + 1] ?? last;
+  const back = (from: Screen) => steps[Math.max(0, steps.indexOf(from) - 1)];
 
   let body: ReactNode;
   if (screen === "welcome") {
@@ -146,7 +160,37 @@ export function WelcomeFlow({ onDone }: { onDone: () => void }) {
           </button>
           <button
             type="button"
-            onClick={() => setScreen(last)}
+            onClick={() => setScreen(next("theme"))}
+            className={btn.primary}
+          >
+            Continue
+            <ArrowRight size={12} weight="bold" />
+          </button>
+        </div>
+      </>
+    );
+  } else if (screen === "changes") {
+    body = (
+      <>
+        <Title
+          title="How should agents change your pages?"
+          sub="Reading never asks. You can switch any time in Settings → Agents."
+        />
+        <div className="mt-6">
+          <ApprovalPicker />
+        </div>
+        <div className="mt-6 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => setScreen(back("changes"))}
+            className={btn.ghost}
+          >
+            <ArrowLeft size={12} />
+            Back
+          </button>
+          <button
+            type="button"
+            onClick={() => setScreen(next("changes"))}
             className={btn.primary}
           >
             Continue
@@ -199,7 +243,7 @@ export function WelcomeFlow({ onDone }: { onDone: () => void }) {
           <Mark size="sm" />
           <span className="text-[13px] font-medium text-ink-2">CoTenk</span>
         </div>
-        <Progress screens={["welcome", "theme", last]} current={screen} />
+        <Progress screens={steps} current={screen} />
       </header>
       <main className="relative flex flex-1 items-center justify-center px-6 pb-14 pt-4">
         <AnimatePresence mode="wait" initial={false}>
@@ -216,6 +260,72 @@ export function WelcomeFlow({ onDone }: { onDone: () => void }) {
           </motion.div>
         </AnimatePresence>
       </main>
+    </div>
+  );
+}
+
+const APPROVAL_OPTIONS: {
+  mode: ApprovalMode;
+  title: string;
+  desc: string;
+  Icon: typeof Eye;
+  badge?: string;
+}[] = [
+  {
+    mode: "review",
+    title: "Review changes",
+    desc: "Each edit and command shows up as a diff first — you approve or reject it.",
+    Icon: Eye,
+    badge: "Recommended",
+  },
+  {
+    mode: "auto",
+    title: "Auto-approve",
+    desc: "Agents edit your pages right away. You watch the changes land and undo with Ctrl Z. Commands still ask.",
+    Icon: Lightning,
+  },
+];
+
+/** Review vs. auto-approve, as two cards. */
+function ApprovalPicker() {
+  const mode = usePermissions((s) => s.mode);
+  const setMode = usePermissions((s) => s.setMode);
+  return (
+    <div role="radiogroup" aria-label="Agent changes" className="grid gap-3 sm:grid-cols-2">
+      {APPROVAL_OPTIONS.map(({ mode: m, title, desc, Icon, badge }) => {
+        const on = mode === m;
+        return (
+          <button
+            key={m}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            onClick={() => setMode(m)}
+            className={`flex flex-col items-start gap-2 rounded-[12px] border p-4 text-left transition-[background-color,border-color] duration-150 ${
+              on
+                ? "border-accent-line bg-accent-dim/50"
+                : "border-line-soft bg-panel hover:bg-hover"
+            }`}
+          >
+            <span className="flex w-full items-center gap-2">
+              <span
+                className={`grid h-7 w-7 place-items-center rounded-[8px] ${
+                  on ? "bg-accent text-on-accent" : "bg-panel-2 text-ink-3"
+                }`}
+              >
+                <Icon size={14} weight="bold" />
+              </span>
+              <span className="text-[13.5px] font-medium text-ink">{title}</span>
+              {badge && (
+                <span className="ml-auto rounded-full bg-accent-dim px-1.5 py-px text-[10.5px] text-accent">
+                  {badge}
+                </span>
+              )}
+            </span>
+            <span className="text-[12.5px] leading-relaxed text-ink-3">{desc}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
