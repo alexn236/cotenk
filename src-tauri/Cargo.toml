@@ -1,6 +1,6 @@
 [package]
 name = "cotenk"
-version = "0.2.2"
+version = "0.2.3"
 description = "CoTenk — an open workspace for people and AI agents"
 edition = "2021"
 license = "MIT"
