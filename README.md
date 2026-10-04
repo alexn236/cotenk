@@ -91,14 +91,26 @@ CoTenk flips that:
 | Linux | `.AppImage` or `.deb` |
 
 All files are on the **[latest release](https://github.com/alexn236/cotenk/releases/latest)**.
-Then click **Connect an agent** on Home — CoTenk installs Claude Code (or
-finds Devin CLI) and walks you through sign-in. That's it.
+Then click **Connect an agent** on Home — CoTenk checks for Node.js
+(and links you to it if it's missing), installs Claude Code (or finds
+Devin CLI) and walks you through sign-in. That's it.
 
-> The builds aren't code-signed with a paid certificate yet. On Windows,
-> SmartScreen may warn — click *More info → Run anyway*. On macOS, open
-> the app once, then *System Settings → Privacy & Security → Open Anyway*.
-> If macOS says the app "is damaged", run `xattr -cr /Applications/CoTenk.app`
-> in Terminal and open it again.
+The builds aren't signed with a paid Apple / Microsoft certificate yet,
+so your system asks once before the first start:
+
+- **Windows** — SmartScreen may warn. Click *More info → Run anyway*.
+- **macOS** — drag CoTenk into *Applications* and open it. If macOS says
+  **"CoTenk is damaged and can't be opened"** (it isn't — that's how
+  macOS shows apps from outside the App Store without an Apple signature),
+  click *Cancel*, open **Terminal** and run:
+
+  ```bash
+  xattr -cr /Applications/CoTenk.app
+  ```
+
+  Then open CoTenk again — from now on it starts normally. On older macOS
+  versions you can instead allow it under *System Settings → Privacy &
+  Security → Open Anyway*.
 
 ## 🔧 Build from source
 

@@ -65,6 +65,136 @@ fn devin_bin() -> String {
     std::env::var("DEVIN_CLI").unwrap_or_else(|_| "devin".to_string())
 }
 
+/// Apps started from Finder or the Dock (macOS) or a desktop launcher
+/// (Linux) get a minimal PATH (`/usr/bin:/bin:…`), so Node.js, npm and the
+/// agent CLIs installed through Homebrew, nvm, Volta or the Node installer
+/// aren't found — the setup guide then says Node.js is missing and the
+/// agents "not installed". Take the PATH the login shell builds, plus the
+/// usual install folders, before anything is spawned.
+#[cfg(unix)]
+fn fix_path() {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut dirs: Vec<String> = Vec::new();
+    let shell = std::env::var("SHELL")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| {
+            if cfg!(target_os = "macos") { "/bin/zsh" } else { "/bin/sh" }.to_string()
+        });
+    if let Some(p) = login_shell_path(&shell) {
+        dirs.extend(p.split(':').map(str::to_string));
+    }
+    if let Ok(p) = std::env::var("PATH") {
+        dirs.extend(p.split(':').map(str::to_string));
+    }
+    let mut extra = vec![
+        "/opt/homebrew/bin".to_string(),
+        "/usr/local/bin".to_string(),
+        format!("{home}/.volta/bin"),
+        format!("{home}/.npm-global/bin"),
+        format!("{home}/.local/bin"),
+        format!("{home}/.bun/bin"),
+        format!("{home}/n/bin"),
+        format!("{home}/.claude/local"),
+    ];
+    // nvm: the newest installed Node version.
+    if let Ok(rd) = std::fs::read_dir(format!("{home}/.nvm/versions/node")) {
+        let mut versions: Vec<PathBuf> = rd.filter_map(|e| e.ok().map(|e| e.path())).collect();
+        versions.sort_by_key(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| {
+                    n.trim_start_matches('v')
+                        .split('.')
+                        .map(|x| x.parse::<u32>().unwrap_or(0))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        });
+        if let Some(latest) = versions.last() {
+            extra.push(latest.join("bin").to_string_lossy().into_owned());
+        }
+    }
+    // Kept even if missing today: Node.js installed while the app runs
+    // (installer → /usr/local/bin, Homebrew → /opt/homebrew/bin) is then
+    // found by "Check again" without a restart.
+    dirs.extend(extra);
+    let mut seen = std::collections::HashSet::new();
+    let path: Vec<String> = dirs
+        .into_iter()
+        .filter(|d| !d.is_empty() && seen.insert(d.clone()))
+        .collect();
+    std::env::set_var("PATH", path.join(":"));
+}
+
+/// Windows apps inherit the PATH from when the user signed in, so Node.js
+/// or a global npm package installed since then isn't found until the
+/// next sign-in. Append their default folders.
+#[cfg(windows)]
+fn fix_path() {
+    let mut path = std::env::var("PATH").unwrap_or_default();
+    let mut extra = Vec::new();
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        extra.push(format!("{appdata}\\npm"));
+    }
+    for var in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Ok(pf) = std::env::var(var) {
+            extra.push(format!("{pf}\\nodejs"));
+        }
+    }
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        extra.push(format!("{local}\\Volta\\bin"));
+    }
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        extra.push(format!("{profile}\\.local\\bin"));
+    }
+    let lower = path.to_lowercase();
+    for d in extra {
+        if !lower.split(';').any(|p| p.trim_end_matches('\\') == d.to_lowercase()) {
+            if !path.is_empty() && !path.ends_with(';') {
+                path.push(';');
+            }
+            path.push_str(&d);
+        }
+    }
+    std::env::set_var("PATH", path);
+}
+
+/// PATH as an interactive login shell sets it up (nvm and friends live
+/// in .zshrc/.bashrc). Markers skip whatever the rc files print; a shell
+/// that hangs is killed after a few seconds.
+#[cfg(unix)]
+fn login_shell_path(shell: &str) -> Option<String> {
+    const MARK: &str = "__COTENK_PATH__";
+    let mut child = Command::new(shell)
+        .args(["-ilc", &format!("printf '{MARK}%s{MARK}' \"$PATH\"")])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if started.elapsed() < std::time::Duration::from_secs(4) => {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    let mut out = String::new();
+    std::io::Read::read_to_string(child.stdout.as_mut()?, &mut out).ok()?;
+    let start = out.find(MARK)? + MARK.len();
+    let end = start + out[start..].find(MARK)?;
+    let p = out[start..end].trim();
+    (!p.is_empty()).then(|| p.to_string())
+}
+
 /// npm package of the Claude Code ACP adapter (formerly
 /// `@zed-industries/claude-code-acp`).
 const CLAUDE_ACP_PACKAGE: &str = "@agentclientprotocol/claude-agent-acp";
@@ -701,6 +831,7 @@ pub fn run() {
         mcp_gateway::serve(args.get(i + 1).map(String::as_str).unwrap_or_default());
         return;
     }
+    fix_path();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AcpState::default())

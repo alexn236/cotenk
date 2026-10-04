@@ -241,12 +241,14 @@ export function AgentSteps({ kind }: { kind: AgentKind }) {
       : installing === kind
         ? "Installing in the terminal window — this takes a minute. This step ticks itself off when it's done."
         : viaNpm
-          ? "Opens a terminal and runs npm install for you."
+          ? nodeOk
+            ? "Opens a terminal and runs npm install for you."
+            : "Needs Node.js first — install it above, then click Check again."
           : `${info.name} comes with its own installer. Install it, then check again.`,
     actions: viaNpm ? (
       <button
         type="button"
-        disabled={!!installing}
+        disabled={!!installing || !nodeOk}
         onClick={() => void install(kind)}
         className={btn.primary}
       >
