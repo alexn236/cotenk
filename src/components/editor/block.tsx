@@ -715,12 +715,19 @@ export function EmbedFrame({
 
   useEffect(() => {
     let saveTimer: ReturnType<typeof setTimeout> | null = null;
+    // If the frame never reports its height (its scripts are blocked or
+    // broken), don't leave the widget squeezed into the minimum.
+    let reported = false;
+    const fallback = setTimeout(() => {
+      if (!reported) setHeight((cur) => Math.max(cur, Math.min(maxHeight, 420)));
+    }, 2000);
     const onMessage = (e: MessageEvent) => {
       if (e.source !== iframeRef.current?.contentWindow) return;
       if (handleFrameNavigation(e.data)) return;
       const data = e.data as { cotenkEmbedHeight?: unknown; cotenkSave?: unknown };
       const h = data?.cotenkEmbedHeight;
       if (typeof h === "number" && Number.isFinite(h)) {
+        reported = true;
         setHeight(Math.min(maxHeight, Math.max(80, Math.ceil(h))));
       }
       const json = data?.cotenkSave;
@@ -733,9 +740,10 @@ export function EmbedFrame({
     window.addEventListener("message", onMessage);
     return () => {
       window.removeEventListener("message", onMessage);
+      clearTimeout(fallback);
       if (saveTimer) clearTimeout(saveTimer);
     };
-  }, [maxHeight]);
+  }, [maxHeight, srcDoc]);
 
   return (
     <iframe
