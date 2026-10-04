@@ -76,7 +76,7 @@ jobs:
             - macOS: `CoTenk_*_aarch64.dmg` (Apple Silicon) or `CoTenk_*_x64.dmg` (Intel)
             - Linux: `.AppImage` or `.deb`
 
-            The builds are not code-signed yet: Windows SmartScreen may warn ("More info → Run anyway"); on macOS right-click the app → Open the first time.
+            The builds are not code-signed with a paid certificate yet. Windows: SmartScreen may warn, click "More info → Run anyway". macOS: open the app once, then System Settings → Privacy & Security → "Open Anyway". If macOS says the app is damaged, run `xattr -cr /Applications/CoTenk.app` in Terminal.
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}

@@ -94,9 +94,11 @@ All files are on the **[latest release](https://github.com/alexn236/cotenk/relea
 Then click **Connect an agent** on Home — CoTenk installs Claude Code (or
 finds Devin CLI) and walks you through sign-in. That's it.
 
-> The builds aren't code-signed yet. On Windows, SmartScreen may warn —
-> click *More info → Run anyway*. On macOS, right-click the app → *Open*
-> the first time.
+> The builds aren't code-signed with a paid certificate yet. On Windows,
+> SmartScreen may warn — click *More info → Run anyway*. On macOS, open
+> the app once, then *System Settings → Privacy & Security → Open Anyway*.
+> If macOS says the app "is damaged", run `xattr -cr /Applications/CoTenk.app`
+> in Terminal and open it again.
 
 ## 🔧 Build from source
 

@@ -1,6 +1,6 @@
 {
   "name": "cotenk",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "Local-first workspace where people and AI agents share documents, tasks and context.",
   "license": "MIT",
